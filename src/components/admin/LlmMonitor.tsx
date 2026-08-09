@@ -33,8 +33,7 @@ export const LlmMonitor = () => {
     return () => clearInterval(id);
   }, []);
 
-  const totalCost = costs.reduce((sum, c) => sum + c.totalCost, 0);
-  const totalTokens = costs.reduce((sum, c) => sum + c.totalTokens, 0);
+  const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
 
   return (
     <div style={{ padding: 24 }}>
@@ -60,10 +59,6 @@ export const LlmMonitor = () => {
               <p style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>총 비용</p>
               <p style={{ color: '#f1f5f9', fontSize: 24, fontWeight: 700 }}>${totalCost.toFixed(4)}</p>
             </div>
-            <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>
-              <p style={{ color: '#64748b', fontSize: 12, marginBottom: 6 }}>총 토큰</p>
-              <p style={{ color: '#f1f5f9', fontSize: 24, fontWeight: 700 }}>{totalTokens.toLocaleString()}</p>
-            </div>
           </div>
 
           <h4 style={{ color: '#94a3b8', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>모델별 비용</h4>
@@ -74,7 +69,7 @@ export const LlmMonitor = () => {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    {['모델', '요청 수', '총 토큰', '총 비용'].map(h => (
+                    {['모델', '총 비용'].map(h => (
                       <th key={h} style={{ padding: '10px 12px', color: '#64748b', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '2px solid #0f172a', textAlign: 'left' }}>{h}</th>
                     ))}
                   </tr>
@@ -83,9 +78,7 @@ export const LlmMonitor = () => {
                   {costs.map(c => (
                     <tr key={c.model}>
                       <td style={{ padding: '10px 12px', color: '#cbd5e1', fontSize: 13, borderBottom: '1px solid #0f172a' }}>{c.model}</td>
-                      <td style={{ padding: '10px 12px', color: '#cbd5e1', fontSize: 13, borderBottom: '1px solid #0f172a' }}>{c.requestCount.toLocaleString()}</td>
-                      <td style={{ padding: '10px 12px', color: '#cbd5e1', fontSize: 13, borderBottom: '1px solid #0f172a' }}>{c.totalTokens.toLocaleString()}</td>
-                      <td style={{ padding: '10px 12px', color: '#cbd5e1', fontSize: 13, borderBottom: '1px solid #0f172a' }}>${c.totalCost.toFixed(4)}</td>
+                      <td style={{ padding: '10px 12px', color: '#cbd5e1', fontSize: 13, borderBottom: '1px solid #0f172a' }}>${c.totalCostUsd.toFixed(4)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { queueAdd } from '../../api/admin';
-import { getQueueStatus, QueueStatus } from '../../api/aiAdmin';
 
 interface JobResult {
   jobId: string;
@@ -14,22 +13,6 @@ export const QueuePanel = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState<JobResult[]>([]);
-  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-
-  const refreshStatus = () => {
-    setStatusLoading(true);
-    getQueueStatus()
-      .then(setQueueStatus)
-      .catch(() => {})
-      .finally(() => setStatusLoading(false));
-  };
-
-  useEffect(() => {
-    refreshStatus();
-    const id = setInterval(refreshStatus, 10000);
-    return () => clearInterval(id);
-  }, []);;
 
   const handleSubmit = async () => {
     if (!jobType.trim()) {
@@ -60,58 +43,9 @@ export const QueuePanel = () => {
     }
   };
 
-  const STAT_LABELS: Record<string, string> = {
-    waiting: '대기',
-    active: '처리 중',
-    completed: '완료',
-    failed: '실패',
-  };
-
-  const STAT_COLORS: Record<string, string> = {
-    waiting: '#f59e0b',
-    active: '#6366f1',
-    completed: '#22c55e',
-    failed: '#ef4444',
-  };
-
   return (
     <div style={{ padding: 24 }}>
       <h3 style={{ color: '#f1f5f9', fontSize: 18, fontWeight: 700, marginBottom: 24 }}>큐 패널</h3>
-
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h4 style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600, margin: 0 }}>큐 상태 모니터링</h4>
-          <button
-            onClick={refreshStatus}
-            disabled={statusLoading}
-            style={{ padding: '4px 12px', background: '#334155', border: 'none', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 12 }}
-          >
-            {statusLoading ? '갱신 중...' : '새로고침'}
-          </button>
-        </div>
-        {queueStatus ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {(['ingest', 'ragas-eval'] as const).map((qName) => {
-              const stat = queueStatus[qName];
-              return (
-                <div key={qName} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '14px 16px' }}>
-                  <div style={{ color: '#6366f1', fontSize: 12, fontWeight: 600, marginBottom: 12, fontFamily: 'monospace' }}>{qName}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    {(Object.keys(STAT_LABELS) as (keyof typeof STAT_LABELS)[]).map((key) => (
-                      <div key={key} style={{ background: '#0f172a', borderRadius: 6, padding: '8px 10px' }}>
-                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>{STAT_LABELS[key]}</div>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: STAT_COLORS[key] }}>{stat[key as keyof typeof stat]}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p style={{ color: '#64748b', fontSize: 13 }}>{statusLoading ? '로딩 중...' : '큐 상태를 불러올 수 없습니다.'}</p>
-        )}
-      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>

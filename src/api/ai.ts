@@ -1,25 +1,16 @@
-import axios from 'axios';
+import client from './client';
 
-if (import.meta.env.PROD && !import.meta.env.VITE_AI_API_BASE_URL) {
-  console.warn('[ai] VITE_AI_API_BASE_URL is not set — falling back to localhost:3004');
-}
-
-const aiClient = axios.create({
-  baseURL: import.meta.env.VITE_AI_API_BASE_URL || 'http://localhost:3004',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+const GATEWAY_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
 export const getDocuments = async () => {
-  const response = await aiClient.get('/knowledge/documents');
+  const response = await client.get('/ai/knowledge/documents');
   return response.data;
 };
 
 export const uploadDocument = async (file: File) => {
   const formData = new FormData();
   formData.append('file', file);
-  const response = await aiClient.post('/knowledge/documents', formData, {
+  const response = await client.post('/ai/knowledge/jobs', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
@@ -28,7 +19,7 @@ export const uploadDocument = async (file: File) => {
 };
 
 export const deleteDocument = async (id: string) => {
-  const response = await aiClient.delete(`/knowledge/documents/${id}`);
+  const response = await client.delete(`/ai/knowledge/documents/${id}`);
   return response.data;
 };
 
@@ -59,17 +50,17 @@ export interface SessionDetailOut {
 }
 
 export const getSessions = async (userId: string, page = 1, limit = 20): Promise<SessionOut[]> => {
-  const response = await aiClient.get('/qa/sessions', { params: { userId, page, limit } });
+  const response = await client.get('/ai/rag/sessions', { params: { userId, page, limit } });
   return response.data ?? [];
 };
 
 export const getSessionDetail = async (sessionId: string): Promise<SessionDetailOut | null> => {
-  const response = await aiClient.get(`/qa/sessions/${sessionId}`);
+  const response = await client.get(`/ai/rag/sessions/${sessionId}`);
   return response.data ?? null;
 };
 
 export const deleteSessionById = async (sessionId: string): Promise<void> => {
-  await aiClient.delete(`/qa/sessions/${sessionId}`);
+  await client.delete(`/ai/rag/sessions/${sessionId}`);
 };
 
 interface ConversationTurn {
@@ -77,18 +68,31 @@ interface ConversationTurn {
   content: string;
 }
 
+interface JobAcceptedOut {
+  jobId: string;
+}
+
+const parseSseEvent = (block: string): { type: string; data: unknown } | null => {
+  const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
+  if (!dataLine) return null;
+  try {
+    return JSON.parse(dataLine.slice(5).trim());
+  } catch {
+    return null;
+  }
+};
+
 export const askQuestionStream = async (
   question: string,
   onMessage: (text: string) => void,
   onDone: () => void,
   onError: (err: unknown) => void,
-  userId?: string | null,
+  _userId?: string | null,
   chatLog?: Array<{ sender: string; text: string }>,
   onSources?: (sources: SourceRef[]) => void,
   sessionId?: string | null,
   onSessionId?: (id: string) => void,
 ) => {
-  const baseUrl = import.meta.env.VITE_AI_API_BASE_URL || 'http://localhost:3004';
   try {
     const conversationHistory: ConversationTurn[] = (chatLog ?? []).map((m) => ({
       role: m.sender === 'user' ? 'user' : 'assistant',
@@ -96,24 +100,22 @@ export const askQuestionStream = async (
     }));
 
     const body: Record<string, unknown> = { question };
-    if (userId) body.userId = userId;
     if (conversationHistory.length > 0) body.conversationHistory = conversationHistory;
     if (sessionId) body.sessionId = sessionId;
-    const response = await fetch(`${baseUrl}/qa/ask`, {
-      method: 'POST',
+
+    const { data: job } = await client.post<JobAcceptedOut>('/ai/rag/jobs', body);
+
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${job.jobId}/stream`, {
+      method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+        Accept: 'text/event-stream',
       },
-      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const newSessionId = response.headers.get('X-Session-Id');
-    if (newSessionId && onSessionId) {
-      onSessionId(newSessionId);
     }
 
     const reader = response.body?.getReader();
@@ -124,58 +126,45 @@ export const askQuestionStream = async (
     const decoder = new TextDecoder();
     let buffer = '';
 
+    const handleBlock = (block: string): boolean => {
+      const event = parseSseEvent(block);
+      if (!event) return false;
+
+      if (event.type === 'session' && onSessionId) {
+        onSessionId(event.data as string);
+      } else if (event.type === 'sources' && onSources) {
+        onSources(event.data as SourceRef[]);
+      } else if (event.type === 'token') {
+        onMessage(event.data as string);
+      } else if (event.type === 'done') {
+        onDone();
+        return true;
+      } else if (event.type === 'error') {
+        onError(new Error((event.data as string) ?? '알 수 없는 오류'));
+        return true;
+      }
+      return false;
+    };
+
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        if (trimmed.startsWith('data:')) {
-          const dataStr = trimmed.slice(5).trim();
-          if (dataStr === '[DONE]') {
-            onDone();
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(dataStr);
-            if (parsed.type === 'sources' && onSources) {
-              onSources(parsed.sources as SourceRef[]);
-            } else if (parsed.text) {
-              onMessage(parsed.text);
-            }
-          } catch {
-            // JSON 파싱 실패 시 무시
-          }
-        }
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        if (handleBlock(block)) return;
       }
     }
 
-    if (buffer.trim().startsWith('data:')) {
-      const dataStr = buffer.trim().slice(5).trim();
-      if (dataStr === '[DONE]') {
-        onDone();
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(dataStr);
-        if (parsed.type === 'sources' && onSources) {
-          onSources(parsed.sources as SourceRef[]);
-        } else if (parsed.text) {
-          onMessage(parsed.text);
-        }
-      } catch {
-        // JSON 파싱 실패 시 무시
-      }
+    if (buffer.trim()) {
+      handleBlock(buffer);
+    } else {
+      onDone();
     }
-    onDone();
   } catch (error) {
     onError(error);
   }
