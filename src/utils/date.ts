@@ -21,6 +21,20 @@ export function formatDate(value: unknown): string {
       if (isNaN(parsedDate.getTime())) {
         return '';
       }
+
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10);
+      const day = parseInt(match[3], 10);
+
+      if (month < 1 || month > 12) {
+        return '';
+      }
+
+      const maxDay = new Date(year, month, 0).getDate();
+      if (day < 1 || day > maxDay) {
+        return '';
+      }
+
       return match[0];
     }
 
