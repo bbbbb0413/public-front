@@ -70,6 +70,17 @@ describe('formatDate', () => {
       expect(formatDate({})).toBe('');
       expect(formatDate([])).toBe('');
     });
+
+    it('월/일이 한 자리인 날짜 문자열이 들어오면 YYYY-MM-DD 형식으로 포맷팅해야 한다', () => {
+      expect(formatDate('2026-8-19')).toBe('2026-08-19');
+      expect(formatDate('2026-08-1')).toBe('2026-08-01');
+    });
+
+    it('ISO 8601 형식이 아니지만 날짜 파싱이 가능한 다른 형식의 문자열도 YYYY-MM-DD 형식으로 포맷팅해야 한다', () => {
+      expect(formatDate('2026.08.19')).toBe('2026-08-19');
+      expect(formatDate('08/19/2026')).toBe('2026-08-19');
+    });
   });
 });
+
 
