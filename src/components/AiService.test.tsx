@@ -127,4 +127,85 @@ describe('AiService Component', () => {
     const answerContainer = screen.getByTestId('chat-answer-content');
     expect(answerContainer.textContent).toContain('안녕하세요');
   });
+
+  it('blocks uploading files larger than 10MB', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File([new ArrayBuffer(11 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(aiApi.uploadDocument).not.toHaveBeenCalled();
+    expect(screen.getByText('파일 크기는 최대 10MB까지 허용됩니다.')).toBeInTheDocument();
+  });
+
+  it('blocks uploading unsupported file types', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File(['test'], 'avatar.png', { type: 'image/png' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(aiApi.uploadDocument).not.toHaveBeenCalled();
+    expect(screen.getByText('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)')).toBeInTheDocument();
+  });
+
+  it('displays specific server error message when upload fails', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    const errorResponse = {
+      response: {
+        data: {
+          message: '파일 크기가 10MB 제한을 초과했습니다.',
+        },
+      },
+    };
+    vi.mocked(aiApi.uploadDocument).mockRejectedValueOnce(errorResponse);
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File(['test'], 'manual.txt', { type: 'text/plain' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
+    expect(screen.getByText('파일 크기가 10MB 제한을 초과했습니다.')).toBeInTheDocument();
+  });
+
+  it('displays default error message if server message is not present', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    vi.mocked(aiApi.uploadDocument).mockRejectedValueOnce(new Error('Unknown error'));
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File(['test'], 'manual.txt', { type: 'text/plain' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
+    expect(screen.getByText('파일 업로드에 실패했습니다.')).toBeInTheDocument();
+  });
 });
