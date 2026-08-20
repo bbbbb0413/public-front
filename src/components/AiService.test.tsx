@@ -135,7 +135,7 @@ describe('AiService Component', () => {
       render(<AiService />);
     });
 
-    const file = new File([new ArrayBuffer(11 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' });
+    const file = new File([new ArrayBuffer(11 * 1024 * 1024)], 'test.pdf', { type: 'application/pdf' });
     const fileInput = screen.getByLabelText('file-upload-input');
 
     await act(async () => {
@@ -153,7 +153,7 @@ describe('AiService Component', () => {
       render(<AiService />);
     });
 
-    const file = new File(['test'], 'avatar.png', { type: 'image/png' });
+    const file = new File(['test'], 'avatar.jpg', { type: 'image/jpeg' });
     const fileInput = screen.getByLabelText('file-upload-input');
 
     await act(async () => {
@@ -207,5 +207,80 @@ describe('AiService Component', () => {
 
     expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
     expect(screen.getByText('파일 업로드에 실패했습니다.')).toBeInTheDocument();
+  });
+
+  it('successfully uploads a valid 5MB manual.txt file and displays no error', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ id: 'doc-3', fileName: 'manual.txt', status: 'processed' });
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File([new ArrayBuffer(5 * 1024 * 1024)], 'manual.txt', { type: 'text/plain' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
+    // 5MB txt 파일 업로드 시 에러가 노출되지 않음을 단언
+    expect(screen.queryByText('파일 크기는 최대 10MB까지 허용됩니다.')).not.toBeInTheDocument();
+    expect(screen.queryByText('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)')).not.toBeInTheDocument();
+    expect(screen.queryByText('파일 업로드에 실패했습니다.')).not.toBeInTheDocument();
+  });
+
+  it('displays server error when file is missing (400 Bad Request)', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    const errorResponse = {
+      response: {
+        data: {
+          message: '업로드할 파일이 누락되었습니다.',
+        },
+      },
+    };
+    vi.mocked(aiApi.uploadDocument).mockRejectedValueOnce(errorResponse);
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File(['test'], 'manual.txt', { type: 'text/plain' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    // 서버의 누락 에러 메시지가 에러 배너에 표시됨을 단언
+    expect(screen.getByText('업로드할 파일이 누락되었습니다.')).toBeInTheDocument();
+  });
+
+  it('displays server error when file type is invalid (400 Bad Request)', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    const errorResponse = {
+      response: {
+        data: {
+          message: '지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)',
+        },
+      },
+    };
+    // 확장자 1차 클라이언트 사이드 필터를 통과해야 하므로 정상 포맷으로 보내서 서버 에러를 강제
+    vi.mocked(aiApi.uploadDocument).mockRejectedValueOnce(errorResponse);
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const file = new File(['test'], 'manual.txt', { type: 'text/plain' });
+    const fileInput = screen.getByLabelText('file-upload-input');
+
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+
+    // 서버의 형식 에러 메시지가 에러 배너에 표시됨을 단언
+    expect(screen.getByText('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)')).toBeInTheDocument();
   });
 });
