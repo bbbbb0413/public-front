@@ -133,6 +133,26 @@ export const AiService = () => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // 1차 클라이언트 사이드 유효성 검사
+    // 1. 파일 크기 검증 (최대 10MB)
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      setErrorMsg('파일 크기는 최대 10MB까지 허용됩니다.');
+      e.target.value = '';
+      return;
+    }
+
+    // 2. 지원 파일 형식 검증 (.txt, .pdf, .md)
+    const allowedExtensions = ['txt', 'pdf', 'md'];
+    const fileName = file.name || '';
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    if (!ext || !allowedExtensions.includes(ext)) {
+      setErrorMsg('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)');
+      e.target.value = '';
+      return;
+    }
+
     setUploading(true);
     setErrorMsg('');
     try {
@@ -148,8 +168,10 @@ export const AiService = () => {
         if (!pending) clearInterval(poll);
       }, 3000);
       setTimeout(() => clearInterval(poll), 30000);
-    } catch {
-      setErrorMsg('파일 업로드에 실패했습니다.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: unknown } } };
+      const serverMessage = err.response?.data?.message;
+      setErrorMsg(typeof serverMessage === 'string' ? serverMessage : '파일 업로드에 실패했습니다.');
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -223,7 +245,7 @@ export const AiService = () => {
                 id="file-upload"
                 aria-label="file-upload-input"
                 type="file"
-                accept=".txt,.pdf,application/pdf"
+                accept=".txt,.pdf,.md,application/pdf"
                 onChange={handleFileUpload}
                 disabled={uploading}
                 style={{ display: 'none' }}
