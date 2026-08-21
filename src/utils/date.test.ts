@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatDate } from './date';
+import { formatDate, formatDateTime } from './date';
 
 describe('formatDate', () => {
   it('유효한 Date 객체를 YYYY-MM-DD 형식의 문자열로 반환해야 한다 (예: 2026-08-19T10:30:00Z -> 2026-08-19)', () => {
@@ -79,6 +79,59 @@ describe('formatDate', () => {
     it('ISO 8601 형식이 아니지만 날짜 파싱이 가능한 다른 형식의 문자열도 YYYY-MM-DD 형식으로 포맷팅해야 한다', () => {
       expect(formatDate('2026.08.19')).toBe('2026-08-19');
       expect(formatDate('08/19/2026')).toBe('2026-08-19');
+    });
+  });
+});
+
+describe('formatDateTime', () => {
+  it('유효한 Date 객체를 YYYY-MM-DD HH:mm:ss 형식의 문자열로 반환해야 한다 (수용 기준: new Date(2026, 7, 19, 14, 30, 5))', () => {
+    const date = new Date(2026, 7, 19, 14, 30, 5);
+    expect(formatDateTime(date)).toBe('2026-08-19 14:30:05');
+  });
+
+  it('유효한 ISO 8601 문자열을 YYYY-MM-DD HH:mm:ss 형식으로 반환해야 한다 (수용 기준: "2026-08-19T14:30:05")', () => {
+    expect(formatDateTime('2026-08-19T14:30:05')).toBe('2026-08-19 14:30:05');
+  });
+
+  it('연, 월, 일, 시, 분, 초는 항상 두 자리로 채워져야 한다 (예: "2026-01-05 09:05:00")', () => {
+    const date = new Date(2026, 0, 5, 9, 5, 0);
+    expect(formatDateTime(date)).toBe('2026-01-05 09:05:00');
+  });
+
+  it('유효하지 않은 Date 객체(Invalid Date)를 입력받으면 빈 문자열을 반환해야 한다', () => {
+    const invalidDate = new Date('Invalid');
+    expect(formatDateTime(invalidDate)).toBe('');
+  });
+
+  it('null을 입력받으면 예외를 던지지 않고 빈 문자열을 반환해야 한다', () => {
+    expect(formatDateTime(null)).toBe('');
+  });
+
+  it('undefined를 입력받으면 예외를 던지지 않고 빈 문자열을 반환해야 한다', () => {
+    expect(formatDateTime(undefined)).toBe('');
+  });
+
+  it('빈 문자열 ""을 입력받으면 빈 문자열을 반환해야 한다', () => {
+    expect(formatDateTime('')).toBe('');
+  });
+
+  describe('경계 케이스 및 추가 예외 검증', () => {
+    it('존재하지 않는 날짜나 시간 문자열(예: 2026-02-30T10:00:00, 2026-08-19T25:00:00)을 입력받으면 빈 문자열을 반환해야 한다', () => {
+      expect(formatDateTime('2026-02-30T10:00:00')).toBe('');
+      expect(formatDateTime('2026-08-19T25:00:00')).toBe('');
+      expect(formatDateTime('2026-08-19T10:60:00')).toBe('');
+      expect(formatDateTime('2026-08-19T10:00:60')).toBe('');
+    });
+
+    it('날짜와 무관한 타입(number, boolean, object, array 등)을 입력받으면 빈 문자열을 반환해야 한다', () => {
+      expect(formatDateTime(1234567890)).toBe('');
+      expect(formatDateTime(true)).toBe('');
+      expect(formatDateTime({})).toBe('');
+      expect(formatDateTime([])).toBe('');
+    });
+
+    it('공백으로 구분된 YYYY-MM-DD HH:mm:ss 형식 문자열도 올바르게 포맷팅해야 한다', () => {
+      expect(formatDateTime('2026-08-19 14:30:05')).toBe('2026-08-19 14:30:05');
     });
   });
 });
