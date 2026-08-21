@@ -24,6 +24,7 @@ interface DocumentInfo {
 interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
+  cancelled?: boolean;
 }
 
 export const AiService = () => {
@@ -45,6 +46,9 @@ export const AiService = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionOut[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+
+  const streamControllerRef = useRef<{ abort: () => Promise<void> } | null>(null);
+
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
@@ -188,6 +192,27 @@ export const AiService = () => {
     }
   };
 
+  const handleCancelStream = async () => {
+    if (!isStreaming) return;
+    const controller = streamControllerRef.current;
+    streamControllerRef.current = null;
+    setIsStreaming(false);
+    if (streamingAnswer) {
+      setChatLog((prev) => [
+        ...prev,
+        { sender: 'ai', text: streamingAnswer, cancelled: true },
+      ]);
+    }
+    setStreamingAnswer('');
+    if (controller) {
+      try {
+        await controller.abort();
+      } catch {
+        // 중단 에러 무시
+      }
+    }
+  };
+
   const handleSendQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!question.trim() || isStreaming) return;
@@ -201,7 +226,7 @@ export const AiService = () => {
     setCurrentSources([]);
 
     let accumulated = '';
-    await askQuestionStream(
+    const controller = askQuestionStream(
       currentQuestion,
       (token) => {
         accumulated += token;
@@ -211,11 +236,13 @@ export const AiService = () => {
         setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated }]);
         setStreamingAnswer('');
         setIsStreaming(false);
+        streamControllerRef.current = null;
         if (userId) fetchSessions();
       },
       (_err) => {
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
         setIsStreaming(false);
+        streamControllerRef.current = null;
       },
       userId,
       prevChatLog,
@@ -223,7 +250,9 @@ export const AiService = () => {
       sessionId,
       (newId) => setSessionId(newId),
     );
+    streamControllerRef.current = controller;
   };
+
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
 
@@ -407,9 +436,16 @@ export const AiService = () => {
                 )}
                 {chatLog.map((msg, idx) => (
                   <div key={idx} className={`chat-message ${msg.sender}`}>
-                    <div className="message-bubble">
+                    <div className={`message-bubble${msg.cancelled ? ' cancelled' : ''}`}>
                       {msg.sender === 'ai' ? (
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        <>
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          {msg.cancelled && (
+                            <div className="cancelled-badge">
+                              <span className="cancelled-icon">⏹</span> [중단된 답변]
+                            </div>
+                          )}
+                        </>
                       ) : (
                         msg.text
                       )}
@@ -458,14 +494,26 @@ export const AiService = () => {
                   disabled={isStreaming}
                   className="chat-input"
                 />
-                <button
-                  type="submit"
-                  disabled={isStreaming || !question.trim()}
-                  className="chat-send-btn"
-                >
-                  {isStreaming ? '답변 중...' : '전송'}
-                </button>
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={handleCancelStream}
+                    className="chat-cancel-btn"
+                    aria-label="답변 생성 중단"
+                  >
+                    중단
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!question.trim()}
+                    className="chat-send-btn"
+                  >
+                    전송
+                  </button>
+                )}
               </form>
+
             </div>
           </div>
         </div>

@@ -78,12 +78,15 @@ describe('AiService Component', () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
     
     // askQuestionStream 호출 시 onMessage 콜백을 수동으로 호출하는 모의 함수 구현
-    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_question, onMessage, onDone, _onError, _userId, _chatLog, _onSources, _sessionId, _onSessionId) => {
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_question, onMessage, onDone) => {
       setTimeout(() => onMessage('안녕'), 10);
       setTimeout(() => onMessage('하세요'), 20);
       setTimeout(() => onDone(), 30);
-      return Promise.resolve();
+      return {
+        abort: vi.fn().mockResolvedValue(undefined),
+      };
     });
+
 
     await act(async () => {
       render(<AiService />);
@@ -127,6 +130,63 @@ describe('AiService Component', () => {
     const answerContainer = screen.getByTestId('chat-answer-content');
     expect(answerContainer.textContent).toContain('안녕하세요');
   });
+
+  it('shows cancel button while streaming and stops generation when clicked', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    const abortMock = vi.fn().mockResolvedValue(undefined);
+    let capturedOnMessage: ((token: string) => void) | null = null;
+
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage) => {
+      capturedOnMessage = onMessage;
+      return {
+        abort: abortMock,
+      };
+    });
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    // 채팅 모달 열기
+    const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+    await act(async () => {
+      fireEvent.click(chatOpenBtn);
+    });
+
+    const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+    const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '긴 답변을 생성해주세요' } });
+      fireEvent.click(sendBtn);
+    });
+
+    // 스트리밍 중 토큰 수신
+    await act(async () => {
+      capturedOnMessage?.('생성된 답변 일부입니다.');
+    });
+
+    // 중단 버튼이 노출되는지 확인
+    const cancelBtn = screen.getByRole('button', { name: /중단/i });
+    expect(cancelBtn).toBeInTheDocument();
+
+    // 중단 버튼 클릭
+    await act(async () => {
+      fireEvent.click(cancelBtn);
+    });
+
+    // abort 호출 및 상태 갱신 확인
+    expect(abortMock).toHaveBeenCalled();
+
+    // 토큰 표시가 멈추고 입력창이 다시 활성화되었는지 확인
+    expect(input).not.toBeDisabled();
+
+    // 중단 시점까지 받은 내용이 남아 있고 중단 표시가 붙는지 확인
+    expect(screen.getAllByText(/생성된 답변 일부입니다/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/중단된 답변/)).toBeInTheDocument();
+  });
+
+
 
   it('blocks uploading files larger than 10MB', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);

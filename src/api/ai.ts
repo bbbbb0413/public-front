@@ -82,7 +82,19 @@ const parseSseEvent = (block: string): { type: string; data: unknown } | null =>
   }
 };
 
-export const askQuestionStream = async (
+export const cancelJob = async (jobId: string): Promise<void> => {
+  try {
+    await client.delete(`/ai/jobs/${jobId}`);
+  } catch {
+    // 백엔드 취소 요청 실패는 무시 (클라이언트 측 중단이 우선)
+  }
+};
+
+export interface StreamController {
+  abort: () => Promise<void>;
+}
+
+export const askQuestionStream = (
   question: string,
   onMessage: (text: string) => void,
   onDone: () => void,
@@ -92,80 +104,113 @@ export const askQuestionStream = async (
   onSources?: (sources: SourceRef[]) => void,
   sessionId?: string | null,
   onSessionId?: (id: string) => void,
-) => {
-  try {
-    const conversationHistory: ConversationTurn[] = (chatLog ?? []).map((m) => ({
-      role: m.sender === 'user' ? 'user' : 'assistant',
-      content: m.text,
-    }));
+): StreamController => {
+  const abortController = new AbortController();
+  let currentJobId: string | null = null;
+  let isAborted = false;
 
-    const body: Record<string, unknown> = { question };
-    if (conversationHistory.length > 0) body.conversationHistory = conversationHistory;
-    if (sessionId) body.sessionId = sessionId;
+  (async () => {
+    try {
+      const conversationHistory: ConversationTurn[] = (chatLog ?? []).map((m) => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
 
-    const { data: job } = await client.post<JobAcceptedOut>('/ai/rag/jobs', body);
+      const body: Record<string, unknown> = { question };
+      if (conversationHistory.length > 0) body.conversationHistory = conversationHistory;
+      if (sessionId) body.sessionId = sessionId;
 
-    const token = localStorage.getItem('token');
-    const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${job.jobId}/stream`, {
-      method: 'GET',
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-        Accept: 'text/event-stream',
-      },
-    });
+      const { data: job } = await client.post<JobAcceptedOut>('/ai/rag/jobs', body);
+      currentJobId = job.jobId;
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+      if (isAborted) {
+        await cancelJob(job.jobId);
+        return;
+      }
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('ReadableStream not supported');
-    }
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${job.jobId}/stream`, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+          Accept: 'text/event-stream',
+        },
+        signal: abortController.signal,
+      });
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-    const handleBlock = (block: string): boolean => {
-      const event = parseSseEvent(block);
-      if (!event) return false;
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('ReadableStream not supported');
+      }
 
-      if (event.type === 'session' && onSessionId) {
-        onSessionId(event.data as string);
-      } else if (event.type === 'sources' && onSources) {
-        onSources(event.data as SourceRef[]);
-      } else if (event.type === 'token') {
-        onMessage(event.data as string);
-      } else if (event.type === 'done') {
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const handleBlock = (block: string): boolean => {
+        const event = parseSseEvent(block);
+        if (!event) return false;
+
+        if (event.type === 'session' && onSessionId) {
+          onSessionId(event.data as string);
+        } else if (event.type === 'sources' && onSources) {
+          onSources(event.data as SourceRef[]);
+        } else if (event.type === 'token') {
+          onMessage(event.data as string);
+        } else if (event.type === 'done') {
+          onDone();
+          return true;
+        } else if (event.type === 'error') {
+          onError(new Error((event.data as string) ?? '알 수 없는 오류'));
+          return true;
+        }
+        return false;
+      };
+
+      while (true) {
+        if (isAborted) {
+          reader.cancel().catch(() => {});
+          break;
+        }
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          if (handleBlock(block)) return;
+        }
+      }
+
+      if (isAborted) return;
+
+      if (buffer.trim()) {
+        handleBlock(buffer);
+      } else {
         onDone();
-        return true;
-      } else if (event.type === 'error') {
-        onError(new Error((event.data as string) ?? '알 수 없는 오류'));
-        return true;
       }
-      return false;
-    };
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split('\n\n');
-      buffer = blocks.pop() || '';
-
-      for (const block of blocks) {
-        if (!block.trim()) continue;
-        if (handleBlock(block)) return;
+    } catch (error) {
+      if (isAborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        return;
       }
+      onError(error);
     }
+  })();
 
-    if (buffer.trim()) {
-      handleBlock(buffer);
-    } else {
-      onDone();
-    }
-  } catch (error) {
-    onError(error);
-  }
+  return {
+    abort: async () => {
+      isAborted = true;
+      abortController.abort();
+      if (currentJobId) {
+        await cancelJob(currentJobId);
+      }
+    },
+  };
 };
+

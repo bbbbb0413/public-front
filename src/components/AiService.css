@@ -527,6 +527,50 @@
   cursor: not-allowed;
 }
 
+.chat-cancel-btn {
+  background: hsla(350, 75%, 55%, 0.9);
+  color: #ffffff;
+  border: 1px solid hsla(350, 80%, 65%, 0.4);
+  border-radius: 10px;
+  padding: 0 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-width: 76px;
+}
+
+.chat-cancel-btn:hover {
+  background: hsla(350, 85%, 50%, 1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsla(350, 80%, 50%, 0.3);
+}
+
+.message-bubble.cancelled {
+  border: 1px solid hsla(350, 60%, 50%, 0.3);
+  background: hsla(350, 60%, 20%, 0.15);
+}
+
+.cancelled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(350, 85%, 75%);
+  background: hsla(350, 70%, 40%, 0.2);
+  border: 1px solid hsla(350, 70%, 50%, 0.3);
+  border-radius: 4px;
+}
+
+.cancelled-icon {
+  font-size: 0.65rem;
+}
+
+
 @keyframes blink {
   0%,
   100% {
