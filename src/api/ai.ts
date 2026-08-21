@@ -29,6 +29,15 @@ export interface SourceRef {
   documentId: string;
 }
 
+export type AgentPhase = 'searching' | 'generating' | 'critiquing' | 'refining';
+
+export interface AgentProgress {
+  iteration: number;
+  phase: AgentPhase;
+  confidence: number;
+  missing: string[];
+}
+
 export interface SessionOut {
   sessionId: string;
   title: string;
@@ -92,6 +101,7 @@ export const askQuestionStream = async (
   onSources?: (sources: SourceRef[]) => void,
   sessionId?: string | null,
   onSessionId?: (id: string) => void,
+  onProgress?: (progress: AgentProgress) => void,
 ) => {
   try {
     const conversationHistory: ConversationTurn[] = (chatLog ?? []).map((m) => ({
@@ -134,6 +144,18 @@ export const askQuestionStream = async (
         onSessionId(event.data as string);
       } else if (event.type === 'sources' && onSources) {
         onSources(event.data as SourceRef[]);
+      } else if (event.type === 'progress' && onProgress) {
+        let progressData = event.data as AgentProgress;
+        if (typeof event.data === 'string') {
+          try {
+            progressData = JSON.parse(event.data) as AgentProgress;
+          } catch {
+            // 파싱 실패 시 무시
+          }
+        }
+        if (progressData && typeof progressData === 'object') {
+          onProgress(progressData);
+        }
       } else if (event.type === 'token') {
         onMessage(event.data as string);
       } else if (event.type === 'done') {
