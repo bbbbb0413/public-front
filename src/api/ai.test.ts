@@ -270,4 +270,56 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onMessage).toHaveBeenCalledWith('응답 내용');
     expect(onDone).toHaveBeenCalled();
   });
+
+  it('askQuestionStream should call onSources when sources events are received with snippet', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onSources = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-sources' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"sources","data":[{"fileName":"sample.pdf","chunkIndex":0,"documentId":"doc-1","snippet":"마스킹된 본문 요약..."}]}\n\n',
+      'id: 2\ndata: {"type":"token","data":"응답"}\n\n',
+      'id: 3\ndata: {"type":"done"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream(
+      'Test question',
+      onMessage,
+      onDone,
+      onError,
+      null,
+      [],
+      onSources,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onSources).toHaveBeenCalledWith([
+      {
+        fileName: 'sample.pdf',
+        chunkIndex: 0,
+        documentId: 'doc-1',
+        snippet: '마스킹된 본문 요약...',
+      },
+    ]);
+    expect(onMessage).toHaveBeenCalledWith('응답');
+    expect(onDone).toHaveBeenCalled();
+  });
 });

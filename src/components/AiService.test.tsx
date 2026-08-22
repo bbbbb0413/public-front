@@ -310,7 +310,7 @@ describe('AiService Component', () => {
             confidence: 0,
             missing: [],
           });
-        }, 10);
+        }, 20);
 
         setTimeout(() => {
           onProgress?.({
@@ -320,11 +320,11 @@ describe('AiService Component', () => {
             missing: ['결제 취소 정책'],
           });
           onMessage('답변 완료되었습니다.');
-        }, 30);
+        }, 80);
 
         setTimeout(() => {
           onDone();
-        }, 50);
+        }, 150);
 
         return Promise.resolve();
       },
@@ -349,7 +349,7 @@ describe('AiService Component', () => {
 
     // 1회차 searching 진행 중 확인
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(screen.getByTestId('agent-progress')).toBeInTheDocument();
     expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
@@ -357,14 +357,14 @@ describe('AiService Component', () => {
 
     // 2회차 refining 진행 중 확인
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 60));
     });
     expect(screen.getByText(/반복 2회차/i)).toBeInTheDocument();
     expect(screen.getByText('답변을 보완하고 다듬는 중')).toBeInTheDocument();
 
     // 완료 후 대기
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await new Promise((resolve) => setTimeout(resolve, 80));
     });
 
     // 진행 상태 바는 사라짐
@@ -567,5 +567,304 @@ describe('AiService Component', () => {
 
     expect(screen.getByTestId('missing-info')).toBeInTheDocument();
     expect(screen.getByText('결제 취소 정책')).toBeInTheDocument();
+  });
+
+  describe('Source snippet preview (SPEC-006)', () => {
+    it('Given 답변에 출처 3건이 딸린 경우 When 사용자가 첫 번째 출처를 누르면 Then 그 조각의 본문이 펼쳐지고 나머지 둘은 접힌 상태를 유지한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'doc1.pdf', chunkIndex: 0, documentId: 'd1', snippet: '첫 번째 문서의 스니펫 내용입니다.' },
+        { fileName: 'doc2.pdf', chunkIndex: 1, documentId: 'd2', snippet: '두 번째 문서의 스니펫 내용입니다.' },
+        { fileName: 'doc3.pdf', chunkIndex: 2, documentId: 'd3', snippet: '세 번째 문서의 스니펫 내용입니다.' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('답변 완료');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '출처 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 기본 상태: 접혀있으므로 snippet 텍스트는 보이지 않음
+      expect(screen.queryByText('첫 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+      expect(screen.queryByText('두 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+      expect(screen.queryByText('세 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+
+      // 첫 번째 출처 토글 버튼 클릭
+      const sourceButtons = screen.getAllByRole('button', { name: /doc/i });
+      expect(sourceButtons.length).toBe(3);
+
+      await act(async () => {
+        fireEvent.click(sourceButtons[0]);
+      });
+
+      // 첫 번째는 펼쳐지고 나머지 둘은 접힌 상태
+      expect(screen.getByText('첫 번째 문서의 스니펫 내용입니다.')).toBeInTheDocument();
+      expect(screen.queryByText('두 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+      expect(screen.queryByText('세 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+
+      // 첫 번째를 다시 누르면 닫힘
+      await act(async () => {
+        fireEvent.click(sourceButtons[0]);
+      });
+      expect(screen.queryByText('첫 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
+    });
+
+    it('Given 조각 본문이 500자인 경우 When 출처를 펼치면 Then 300자까지만 보이고 끝에 말줄임표가 붙는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const longSnippet = 'A'.repeat(300) + '...';
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'long.pdf', chunkIndex: 0, documentId: 'd-long', snippet: longSnippet },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('답변 완료');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '긴 본문 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const sourceBtn = screen.getByRole('button', { name: /long\.pdf/i });
+      await act(async () => {
+        fireEvent.click(sourceBtn);
+      });
+
+      expect(screen.getByText(longSnippet)).toBeInTheDocument();
+      expect(screen.getByTestId('source-snippet-0').textContent?.length).toBe(303);
+    });
+
+    it('Given 조각 본문에 010-1234-5678 이 포함된 경우 When 출처를 펼치면 Then 그 번호가 마스킹된 상태로 보인다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const maskedSnippet = '사용자 연락처는 [REDACTED_KR_PHONE] 입니다.';
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'pii.pdf', chunkIndex: 0, documentId: 'd-pii', snippet: maskedSnippet },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('답변 완료');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '마스킹 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const sourceBtn = screen.getByRole('button', { name: /pii\.pdf/i });
+      await act(async () => {
+        fireEvent.click(sourceBtn);
+      });
+
+      expect(screen.getByText(maskedSnippet)).toBeInTheDocument();
+      expect(screen.queryByText(/010-1234-5678/)).not.toBeInTheDocument();
+    });
+
+    it('Given snippet 필드가 없는 응답 When 출처 목록을 그리면 Then 파일 이름만 표시되고 오류가 나지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'legacy.pdf', chunkIndex: 0, documentId: 'd-legacy' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('옛 백엔드 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '레거시 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByText('legacy.pdf')).toBeInTheDocument();
+      expect(screen.getByText('청크 0')).toBeInTheDocument();
+    });
+
+    it('Given 출처 항목에 키보드 포커스가 있을 때 When Enter를 누르면 Then 마우스로 누른 것과 같이 펼쳐진다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'keyboard.pdf', chunkIndex: 0, documentId: 'd-kb', snippet: '키보드로 펼친 스니펫 내용' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('키보드 테스트 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '키보드 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const sourceBtn = screen.getByRole('button', { name: /keyboard\.pdf/i });
+      expect(screen.queryByText('키보드로 펼친 스니펫 내용')).not.toBeInTheDocument();
+
+      // Enter 키 이벤트 트리거
+      await act(async () => {
+        fireEvent.keyDown(sourceBtn, { key: 'Enter', code: 'Enter' });
+      });
+
+      expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
+    });
   });
 });
