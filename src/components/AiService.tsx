@@ -9,6 +9,8 @@ import {
   deleteSessionById,
   SourceRef,
   SessionOut,
+  AgentProgress,
+  AgentPhase,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import './AiService.css';
@@ -24,7 +26,16 @@ interface DocumentInfo {
 interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
+  confidence?: number;
+  missing?: string[];
 }
+
+const PHASE_LABELS: Record<AgentPhase, string> = {
+  searching: '관련 문서를 찾는 중',
+  generating: '답변을 생성하는 중',
+  critiquing: '답변을 검토하고 평가하는 중',
+  refining: '답변을 보완하고 다듬는 중',
+};
 
 export const AiService = () => {
   const authCtx = useContext(AuthContext);
@@ -41,6 +52,7 @@ export const AiService = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [currentSources, setCurrentSources] = useState<SourceRef[]>([]);
+  const [currentProgress, setCurrentProgress] = useState<AgentProgress | null>(null);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionOut[]>([]);
@@ -67,6 +79,7 @@ export const AiService = () => {
     setChatLog([]);
     setStreamingAnswer('');
     setCurrentSources([]);
+    setCurrentProgress(null);
   };
 
   const handleLoadSession = async (sid: string) => {
@@ -82,6 +95,7 @@ export const AiService = () => {
       setChatLog(loaded);
       setStreamingAnswer('');
       setCurrentSources([]);
+      setCurrentProgress(null);
     } catch {
       setErrorMsg('세션을 불러오는 데 실패했습니다.');
     }
@@ -117,7 +131,7 @@ export const AiService = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatLog, streamingAnswer]);
+  }, [chatLog, streamingAnswer, currentProgress]);
 
   useEffect(() => {
     if (!isChatOpen) return;
@@ -199,8 +213,11 @@ export const AiService = () => {
     setIsStreaming(true);
     setStreamingAnswer('');
     setCurrentSources([]);
+    setCurrentProgress(null);
 
     let accumulated = '';
+    let lastProgress: AgentProgress | null = null;
+
     await askQuestionStream(
       currentQuestion,
       (token) => {
@@ -208,13 +225,23 @@ export const AiService = () => {
         setStreamingAnswer(accumulated);
       },
       () => {
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated }]);
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated,
+            confidence: lastProgress?.confidence,
+            missing: lastProgress?.missing,
+          },
+        ]);
         setStreamingAnswer('');
+        setCurrentProgress(null);
         setIsStreaming(false);
         if (userId) fetchSessions();
       },
-      (_err) => {
+      () => {
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
+        setCurrentProgress(null);
         setIsStreaming(false);
       },
       userId,
@@ -222,6 +249,10 @@ export const AiService = () => {
       (sources) => setCurrentSources(sources),
       sessionId,
       (newId) => setSessionId(newId),
+      (progress) => {
+        lastProgress = progress;
+        setCurrentProgress(progress);
+      },
     );
   };
 
@@ -409,7 +440,27 @@ export const AiService = () => {
                   <div key={idx} className={`chat-message ${msg.sender}`}>
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        <>
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          {msg.confidence !== undefined && (
+                            <div className="confidence-badge" data-testid="confidence-badge">
+                              <span className="confidence-label">신뢰도:</span>
+                              <span className="confidence-value">{Math.round(msg.confidence * 100)}%</span>
+                            </div>
+                          )}
+                          {msg.missing && msg.missing.length > 0 && (
+                            <div className="missing-info" data-testid="missing-info">
+                              <span className="missing-label">확인하지 못한 항목:</span>
+                              <ul className="missing-list">
+                                {msg.missing.map((item, mIdx) => (
+                                  <li key={mIdx} className="missing-item">
+                                    {item}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
                       ) : (
                         msg.text
                       )}
@@ -419,8 +470,25 @@ export const AiService = () => {
                 {isStreaming && (
                   <div className="chat-message ai">
                     <div className="message-bubble streaming">
-                      <ReactMarkdown>{streamingAnswer}</ReactMarkdown>
-                      <span className="cursor">|</span>
+                      {currentProgress && (
+                        <div className="agent-progress-indicator" data-testid="agent-progress">
+                          <span className="progress-spinner" aria-hidden="true"></span>
+                          <span className="progress-iteration">
+                            [반복 {currentProgress.iteration}회차]
+                          </span>
+                          <span className="progress-phase">
+                            {PHASE_LABELS[currentProgress.phase] || currentProgress.phase}
+                          </span>
+                        </div>
+                      )}
+                      {streamingAnswer ? (
+                        <>
+                          <ReactMarkdown>{streamingAnswer}</ReactMarkdown>
+                          <span className="cursor">|</span>
+                        </>
+                      ) : (
+                        !currentProgress && <span className="cursor">|</span>
+                      )}
                     </div>
                   </div>
                 )}

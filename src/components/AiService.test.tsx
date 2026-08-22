@@ -78,7 +78,9 @@ describe('AiService Component', () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
     
     // askQuestionStream 호출 시 onMessage 콜백을 수동으로 호출하는 모의 함수 구현
-    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_question, onMessage, onDone, _onError, _userId, _chatLog, _onSources, _sessionId, _onSessionId) => {
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+      const onMessage = args[1];
+      const onDone = args[2];
       setTimeout(() => onMessage('안녕'), 10);
       setTimeout(() => onMessage('하세요'), 20);
       setTimeout(() => onDone(), 30);
@@ -112,6 +114,7 @@ describe('AiService Component', () => {
       [],
       expect.any(Function),
       null,
+      expect.any(Function),
       expect.any(Function),
     );
 
@@ -282,5 +285,287 @@ describe('AiService Component', () => {
 
     // 서버의 형식 에러 메시지가 에러 배너에 표시됨을 단언
     expect(screen.getByText('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)')).toBeInTheDocument();
+  });
+
+  it('displays iteration and phase during streaming and shows confidence & missing items when completed', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+      (
+        _question,
+        onMessage,
+        onDone,
+        _onError,
+        _userId,
+        _chatLog,
+        _onSources,
+        _sessionId,
+        _onSessionId,
+        onProgress,
+      ) => {
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 1,
+            phase: 'searching',
+            confidence: 0,
+            missing: [],
+          });
+        }, 10);
+
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 2,
+            phase: 'refining',
+            confidence: 0.85,
+            missing: ['결제 취소 정책'],
+          });
+          onMessage('답변 완료되었습니다.');
+        }, 30);
+
+        setTimeout(() => {
+          onDone();
+        }, 50);
+
+        return Promise.resolve();
+      },
+    );
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+    await act(async () => {
+      fireEvent.click(chatOpenBtn);
+    });
+
+    const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+    const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '정책 질문' } });
+      fireEvent.click(sendBtn);
+    });
+
+    // 1회차 searching 진행 중 확인
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(screen.getByTestId('agent-progress')).toBeInTheDocument();
+    expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
+    expect(screen.getByText('관련 문서를 찾는 중')).toBeInTheDocument();
+
+    // 2회차 refining 진행 중 확인
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    expect(screen.getByText(/반복 2회차/i)).toBeInTheDocument();
+    expect(screen.getByText('답변을 보완하고 다듬는 중')).toBeInTheDocument();
+
+    // 완료 후 대기
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    // 진행 상태 바는 사라짐
+    expect(screen.queryByTestId('agent-progress')).not.toBeInTheDocument();
+
+    // 최종 신뢰도 및 누락 항목 표시 확인
+    expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+    expect(screen.getByText('85%')).toBeInTheDocument();
+
+    expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+    expect(screen.getByText('결제 취소 정책')).toBeInTheDocument();
+  });
+
+  it('Given 에이전틱 루프가 2회 반복하는 질문 When 사용자가 질문하면 Then 화면에 반복 회차와 현재 단계가 순서대로 표시된다', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+      (
+        _question,
+        _onMessage,
+        _onDone,
+        _onError,
+        _userId,
+        _chatLog,
+        _onSources,
+        _sessionId,
+        _onSessionId,
+        onProgress,
+      ) => {
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 1,
+            phase: 'searching',
+            confidence: 0,
+            missing: [],
+          });
+        }, 10);
+
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 2,
+            phase: 'critiquing',
+            confidence: 0.7,
+            missing: [],
+          });
+        }, 30);
+
+        return Promise.resolve();
+      },
+    );
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+    await act(async () => {
+      fireEvent.click(chatOpenBtn);
+    });
+
+    const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+    const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '2회 반복 질문' } });
+      fireEvent.click(sendBtn);
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
+    expect(screen.getByText('관련 문서를 찾는 중')).toBeInTheDocument();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    expect(screen.getByText(/반복 2회차/i)).toBeInTheDocument();
+    expect(screen.getByText('답변을 검토하고 평가하는 중')).toBeInTheDocument();
+  });
+
+  it('Given 루프가 1회로 끝나는 단순한 질문 When 답변이 완료되면 Then 진행 표시가 사라지고 최종 신뢰도가 답변 옆에 남는다', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+      (
+        _question,
+        onMessage,
+        onDone,
+        _onError,
+        _userId,
+        _chatLog,
+        _onSources,
+        _sessionId,
+        _onSessionId,
+        onProgress,
+      ) => {
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 1,
+            phase: 'generating',
+            confidence: 0.95,
+            missing: [],
+          });
+          onMessage('단순 답변입니다.');
+        }, 10);
+
+        setTimeout(() => {
+          onDone();
+        }, 30);
+
+        return Promise.resolve();
+      },
+    );
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+    await act(async () => {
+      fireEvent.click(chatOpenBtn);
+    });
+
+    const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+    const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '단순 질문' } });
+      fireEvent.click(sendBtn);
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+    expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
+    expect(screen.getByText('답변을 생성하는 중')).toBeInTheDocument();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(screen.queryByTestId('agent-progress')).not.toBeInTheDocument();
+    expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+    expect(screen.getByText('95%')).toBeInTheDocument();
+    expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+  });
+
+  it('Given 비평이 missing: ["결제 취소 정책"] 을 돌려준 경우 When 답변이 완료되면 Then 확인하지 못한 항목으로 "결제 취소 정책" 이 표시된다', async () => {
+    vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+      (
+        _question,
+        onMessage,
+        onDone,
+        _onError,
+        _userId,
+        _chatLog,
+        _onSources,
+        _sessionId,
+        _onSessionId,
+        onProgress,
+      ) => {
+        setTimeout(() => {
+          onProgress?.({
+            iteration: 2,
+            phase: 'refining',
+            confidence: 0.6,
+            missing: ['결제 취소 정책'],
+          });
+          onMessage('답변입니다.');
+          onDone();
+        }, 10);
+
+        return Promise.resolve();
+      },
+    );
+
+    await act(async () => {
+      render(<AiService />);
+    });
+
+    const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+    await act(async () => {
+      fireEvent.click(chatOpenBtn);
+    });
+
+    const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+    const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '취소 정책 질문' } });
+      fireEvent.click(sendBtn);
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+    expect(screen.getByText('결제 취소 정책')).toBeInTheDocument();
   });
 });

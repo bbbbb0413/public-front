@@ -174,4 +174,100 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onDone).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith(new Error('boom'));
   });
+
+  it('askQuestionStream should call onProgress when progress events are received', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onProgress = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-progress' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"progress","data":{"iteration":1,"phase":"searching","confidence":0,"missing":[]}}\n\n',
+      'id: 2\ndata: {"type":"progress","data":"{\\"iteration\\":1,\\"phase\\":\\"generating\\",\\"confidence\\":0.8,\\"missing\\":[\\"누락정보\\"]}"}\n\n',
+      'id: 3\ndata: {"type":"token","data":"응답 내용"}\n\n',
+      'id: 4\ndata: {"type":"done"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream(
+      'Test question',
+      onMessage,
+      onDone,
+      onError,
+      null,
+      [],
+      undefined,
+      null,
+      undefined,
+      onProgress,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(1, {
+      iteration: 1,
+      phase: 'searching',
+      confidence: 0,
+      missing: [],
+    });
+    expect(onProgress).toHaveBeenNthCalledWith(2, {
+      iteration: 1,
+      phase: 'generating',
+      confidence: 0.8,
+      missing: ['누락정보'],
+    });
+    expect(onMessage).toHaveBeenCalledWith('응답 내용');
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it('askQuestionStream should ignore progress event if onProgress is not provided', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-progress-ignored' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"progress","data":{"iteration":1,"phase":"searching","confidence":0,"missing":[]}}\n\n',
+      'id: 2\ndata: {"type":"token","data":"응답 내용"}\n\n',
+      'id: 3\ndata: {"type":"done"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream('Test question', onMessage, onDone, onError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onMessage).toHaveBeenCalledWith('응답 내용');
+    expect(onDone).toHaveBeenCalled();
+  });
 });
