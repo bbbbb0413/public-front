@@ -27,6 +27,7 @@ export interface SourceRef {
   fileName: string;
   chunkIndex: number;
   documentId: string;
+  snippet?: string;
 }
 
 export type AgentPhase = 'searching' | 'generating' | 'critiquing' | 'refining';

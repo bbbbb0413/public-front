@@ -580,18 +580,40 @@
   margin: 0;
   padding: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 
-.source-ref-item {
+.source-ref-item-container {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-ref-item {
+  display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 6px;
   background: rgba(99, 102, 241, 0.12);
   border: 1px solid rgba(99, 102, 241, 0.2);
   border-radius: 4px;
   padding: 3px 8px;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-align: left;
+}
+
+.source-ref-item:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.source-ref-item.expanded {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.45);
 }
 
 .source-ref-name {
@@ -605,6 +627,37 @@
   background: rgba(99, 102, 241, 0.15);
   padding: 1px 5px;
   border-radius: 3px;
+}
+
+.source-ref-toggle-icon {
+  font-size: 8px;
+  color: #a5b4fc;
+  margin-left: 2px;
+}
+
+.source-ref-snippet {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-left: 3px solid #6366f1;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: hsl(210, 15%, 85%);
+  white-space: pre-wrap;
+  word-break: break-word;
+  animation: snippetFadeIn 0.15s ease-out;
+}
+
+@keyframes snippetFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── 에이전트 추론 진행 상태 & 신뢰도 스타일 ── */

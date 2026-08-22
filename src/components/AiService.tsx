@@ -74,11 +74,21 @@ export const AiService = () => {
     }
   };
 
+  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
+
+  const toggleSourceExpand = (index: number) => {
+    setExpandedSources((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
   const handleNewChat = () => {
     setSessionId(null);
     setChatLog([]);
     setStreamingAnswer('');
     setCurrentSources([]);
+    setExpandedSources({});
     setCurrentProgress(null);
   };
 
@@ -95,6 +105,7 @@ export const AiService = () => {
       setChatLog(loaded);
       setStreamingAnswer('');
       setCurrentSources([]);
+      setExpandedSources({});
       setCurrentProgress(null);
     } catch {
       setErrorMsg('세션을 불러오는 데 실패했습니다.');
@@ -213,6 +224,7 @@ export const AiService = () => {
     setIsStreaming(true);
     setStreamingAnswer('');
     setCurrentSources([]);
+    setExpandedSources({});
     setCurrentProgress(null);
 
     let accumulated = '';
@@ -496,12 +508,38 @@ export const AiService = () => {
                   <div className="source-refs">
                     <span className="source-refs-label">참고 문서</span>
                     <ul className="source-refs-list">
-                      {currentSources.map((src, i) => (
-                        <li key={i} className="source-ref-item">
-                          <span className="source-ref-name">{src.fileName}</span>
-                          <span className="source-ref-chunk">청크 {src.chunkIndex}</span>
-                        </li>
-                      ))}
+                      {currentSources.map((src, i) => {
+                        const isExpanded = !!expandedSources[i];
+                        return (
+                          <li key={i} className="source-ref-item-container">
+                            <button
+                              type="button"
+                              className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
+                              onClick={() => toggleSourceExpand(i)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  toggleSourceExpand(i);
+                                }
+                              }}
+                              aria-expanded={isExpanded}
+                            >
+                              <span className="source-ref-name">{src.fileName}</span>
+                              <span className="source-ref-chunk">청크 {src.chunkIndex}</span>
+                              {src.snippet && (
+                                <span className="source-ref-toggle-icon" aria-hidden="true">
+                                  {isExpanded ? '▲' : '▼'}
+                                </span>
+                              )}
+                            </button>
+                            {isExpanded && src.snippet && (
+                              <div className="source-ref-snippet" data-testid={`source-snippet-${i}`}>
+                                {src.snippet}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}
