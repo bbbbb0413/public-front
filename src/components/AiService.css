@@ -527,6 +527,42 @@
   cursor: not-allowed;
 }
 
+.chat-cancel-btn {
+  background: hsla(350, 80%, 50%, 0.2);
+  border: 1px solid hsla(350, 80%, 55%, 0.4);
+  color: hsl(350, 90%, 75%);
+  border-radius: 10px;
+  padding: 0 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-width: 76px;
+}
+
+.chat-cancel-btn:hover {
+  background: hsla(350, 80%, 50%, 0.35);
+  border-color: hsl(350, 90%, 65%);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.cancelled-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  background: hsla(350, 80%, 40%, 0.2);
+  border: 1px solid hsla(350, 80%, 50%, 0.35);
+  color: hsl(350, 90%, 75%);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
 @keyframes blink {
   0%,
   100% {

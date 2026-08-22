@@ -135,6 +135,7 @@ describe('AI Service API (Gateway 경유)', () => {
         Authorization: 'Bearer jwt-token',
         Accept: 'text/event-stream',
       },
+      signal: expect.any(AbortSignal),
     });
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -321,5 +322,64 @@ describe('AI Service API (Gateway 경유)', () => {
     ]);
     expect(onMessage).toHaveBeenCalledWith('응답');
     expect(onDone).toHaveBeenCalled();
+  });
+
+  describe('Stream cancellation (SPEC-007)', () => {
+    it('cancelJob should send DELETE request to /ai/jobs/:jobId', async () => {
+      mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+      const { cancelJob } = await import('./ai');
+
+      await cancelJob('job-123');
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/jobs/job-123');
+    });
+
+    it('cancelJob should not throw even if DELETE request fails', async () => {
+      mockAxios.delete.mockRejectedValueOnce(new Error('Network error'));
+      const { cancelJob } = await import('./ai');
+
+      await expect(cancelJob('job-failed')).resolves.not.toThrow();
+    });
+
+    it('askQuestionStream cancel method should abort fetch and send DELETE request', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-cancel-1' } });
+      mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('id: 1\ndata: {"type":"token","data":"첫 번째 토큰"}\n\n'));
+        },
+      });
+
+      const abortSpy = vi.fn();
+      const mockResponse = {
+        ok: true,
+        body: stream,
+        headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+      };
+
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, options) => {
+        if (options?.signal) {
+          options.signal.addEventListener('abort', abortSpy);
+        }
+        return Promise.resolve(mockResponse);
+      }));
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      const streamTask = askQuestionStream('중단 테스트', onMessage, onDone, onError);
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(onMessage).toHaveBeenCalledWith('첫 번째 토큰');
+
+      // 중단 호출
+      await streamTask.cancel?.();
+
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/jobs/job-cancel-1');
+      expect(abortSpy).toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
   });
 });

@@ -867,4 +867,143 @@ describe('AiService Component', () => {
       expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
     });
   });
+
+  describe('Answer cancellation (SPEC-007)', () => {
+    it('Given 답변이 생성되는 동안 When 화면을 보면 Then 중단 버튼이 보이고 입력창은 비활성화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        const promise = new Promise<void>(() => {}) as aiApi.AskStreamPromise;
+        promise.cancel = vi.fn().mockResolvedValue(undefined);
+        return promise;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '중단 여부 확인 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 스트리밍 중에는 중단 버튼이 노출되고 입력창은 disabled 상태
+      const cancelBtn = screen.getByRole('button', { name: /중단/i });
+      expect(cancelBtn).toBeInTheDocument();
+      expect(input).toBeDisabled();
+    });
+
+    it('Given 답변이 스트리밍되는 중 When 사용자가 중단을 누르면 Then 스트림 구독을 끊고 입력창이 다시 활성화되며 중단된 지점까지 받은 답변과 중단 표시가 남는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      let messageCallback: ((token: string) => void) | null = null;
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        messageCallback = args[1];
+        setTimeout(() => {
+          messageCallback?.('생성된 첫 번째 문장.');
+        }, 10);
+        const promise = new Promise<void>(() => {}) as aiApi.AskStreamPromise;
+        promise.cancel = cancelMock;
+        return promise;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '중단 테스트 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getAllByText('생성된 첫 번째 문장.').length).toBeGreaterThanOrEqual(1);
+
+      const cancelBtn = screen.getByRole('button', { name: /중단/i });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // 중단 API 호출 확인
+      expect(cancelMock).toHaveBeenCalled();
+
+      // 토큰 표시 및 스트리밍 상태 종료 후 입력창 다시 활성화
+      expect(input).not.toBeDisabled();
+      expect(screen.queryByRole('button', { name: /중단/i })).not.toBeInTheDocument();
+
+      // 중단 시점까지 받은 내용이 남아 있고 중단 표시가 붙음
+      expect(screen.getAllByText('생성된 첫 번째 문장.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId('cancelled-badge')).toBeInTheDocument();
+      expect(screen.getByText('중단됨')).toBeInTheDocument();
+    });
+
+    it('Given DELETE 요청이 실패한 경우 When 사용자가 중단을 눌렀다면 Then 화면은 중단 상태가 되고 오류 메시지를 띄우지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const cancelMock = vi.fn().mockRejectedValue(new Error('DELETE failed'));
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        setTimeout(() => {
+          onMessage('진행 중...');
+        }, 10);
+        const promise = new Promise<void>(() => {}) as aiApi.AskStreamPromise;
+        promise.cancel = cancelMock;
+        return promise;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'DELETE 실패 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: /중단/i });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // 화면은 중단 상태이고 에러 배너나 오류 메시지를 띄우지 않음
+      expect(input).not.toBeDisabled();
+      expect(screen.getByTestId('cancelled-badge')).toBeInTheDocument();
+      expect(screen.queryByText('답변 수신 도중 에러가 발생했습니다.')).not.toBeInTheDocument();
+      expect(screen.queryByText('DELETE failed')).not.toBeInTheDocument();
+    });
+  });
 });
