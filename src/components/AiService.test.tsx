@@ -644,6 +644,120 @@ describe('AiService Component', () => {
       expect(screen.queryByText('첫 번째 문서의 스니펫 내용입니다.')).not.toBeInTheDocument();
     });
 
+    it('Given 조각 본문이 500자인 경우 When 출처를 펼치면 Then 300자까지만 보이고 끝에 말줄임표가 붙는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const longSnippet = 'A'.repeat(300) + '...';
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'long.pdf', chunkIndex: 0, documentId: 'd-long', snippet: longSnippet },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('답변 완료');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '긴 본문 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const sourceBtn = screen.getByRole('button', { name: /long\.pdf/i });
+      await act(async () => {
+        fireEvent.click(sourceBtn);
+      });
+
+      expect(screen.getByText(longSnippet)).toBeInTheDocument();
+      expect(screen.getByTestId('source-snippet-0').textContent?.length).toBe(303);
+    });
+
+    it('Given 조각 본문에 010-1234-5678 이 포함된 경우 When 출처를 펼치면 Then 그 번호가 마스킹된 상태로 보인다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const maskedSnippet = '사용자 연락처는 [REDACTED_KR_PHONE] 입니다.';
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'pii.pdf', chunkIndex: 0, documentId: 'd-pii', snippet: maskedSnippet },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('답변 완료');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '마스킹 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const sourceBtn = screen.getByRole('button', { name: /pii\.pdf/i });
+      await act(async () => {
+        fireEvent.click(sourceBtn);
+      });
+
+      expect(screen.getByText(maskedSnippet)).toBeInTheDocument();
+      expect(screen.queryByText(/010-1234-5678/)).not.toBeInTheDocument();
+    });
+
     it('Given snippet 필드가 없는 응답 When 출처 목록을 그리면 Then 파일 이름만 표시되고 오류가 나지 않는다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
