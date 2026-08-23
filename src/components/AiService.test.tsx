@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { AiService } from './AiService';
 import * as aiApi from '../api/ai';
@@ -865,6 +865,268 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
+    });
+
+    describe('AI 답변 클립보드 복사 기능', () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('Given 완료된 AI 답변이 화면에 표시된 경우 When 사용자가 "복사" 버튼을 클릭하면 Then 클립보드에 해당 AI 답변의 마크다운 원문 텍스트가 복사되고 버튼 텍스트가 2초간 "복사됨" 으로 변경된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        const writeTextMock = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, {
+          clipboard: {
+            writeText: writeTextMock,
+          },
+        });
+
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          onMessage('**마크다운 답변**입니다.');
+          onDone();
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '질문' } });
+          fireEvent.click(sendBtn);
+        });
+
+        const copyBtn = screen.getByRole('button', { name: /답변 복사/i });
+        expect(copyBtn).toHaveTextContent('복사');
+
+        await act(async () => {
+          fireEvent.click(copyBtn);
+        });
+
+        expect(writeTextMock).toHaveBeenCalledWith('**마크다운 답변**입니다.');
+        expect(copyBtn).toHaveTextContent('복사됨');
+
+        // 2초 후 다시 '복사'로 복귀
+        await act(async () => {
+          vi.advanceTimersByTime(2000);
+        });
+
+        expect(copyBtn).toHaveTextContent('복사');
+      });
+
+      it('Given 대화창에 복수의 AI 답변이 존재하는 경우 When 특정 AI 답변의 복사 버튼을 클릭하면 Then 클릭된 메시지의 버튼만 "복사됨" 으로 변경되고 다른 메시지의 복사 버튼 상태에는 영향을 주지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        const writeTextMock = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, {
+          clipboard: {
+            writeText: writeTextMock,
+          },
+        });
+
+        // 1번째 질문 & 답변
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          onMessage('첫 번째 답변');
+          onDone();
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '질문 1' } });
+          fireEvent.click(sendBtn);
+        });
+
+        // 2번째 질문 & 답변
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          onMessage('두 번째 답변');
+          onDone();
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '질문 2' } });
+          fireEvent.click(sendBtn);
+        });
+
+        const copyButtons = screen.getAllByRole('button', { name: /답변 복사/i });
+        expect(copyButtons).toHaveLength(2);
+
+        await act(async () => {
+          fireEvent.click(copyButtons[0]);
+        });
+
+        expect(writeTextMock).toHaveBeenCalledWith('첫 번째 답변');
+        expect(copyButtons[0]).toHaveTextContent('복사됨');
+        expect(copyButtons[1]).toHaveTextContent('복사');
+      });
+
+      it('Given AI 답변이 실시간으로 스트리밍 중인 경우 When 화면을 확인하면 Then 스트리밍 중인 메시지 버블에는 복사 버튼이 노출되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          onMessage('스트리밍 중인 답변');
+          // onDone 호출하지 않음 (스트리밍 상태 유지)
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '스트리밍 질문' } });
+          fireEvent.click(sendBtn);
+        });
+
+        expect(screen.queryByRole('button', { name: /답변 복사/i })).not.toBeInTheDocument();
+      });
+
+      it('Given 사용자가 입력한 메시지 버블인 경우 When 화면을 확인하면 Then 사용자 메시지 버블에는 복사 버튼이 노출되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        expect(screen.queryByRole('button', { name: /답변 복사/i })).not.toBeInTheDocument();
+      });
+
+      it('Given navigator.clipboard.writeText 호출이 실패(reject)한 경우 When 사용자가 복사 버튼을 클릭하면 Then 버튼 텍스트가 변경되지 않고 상단 에러 배너에 "답변 복사에 실패했습니다." 가 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        const writeTextMock = vi.fn().mockRejectedValue(new Error('Clipboard error'));
+        Object.assign(navigator, {
+          clipboard: {
+            writeText: writeTextMock,
+          },
+        });
+
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          onMessage('에러 테스트 답변');
+          onDone();
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '에러 질문' } });
+          fireEvent.click(sendBtn);
+        });
+
+        const copyBtn = screen.getByRole('button', { name: /답변 복사/i });
+
+        await act(async () => {
+          fireEvent.click(copyBtn);
+        });
+
+        expect(writeTextMock).toHaveBeenCalledWith('에러 테스트 답변');
+        expect(copyBtn).toHaveTextContent('복사');
+        expect(screen.getByText('답변 복사에 실패했습니다.')).toBeInTheDocument();
+      });
+
+      it('Given 복사 버튼에 키보드 포커스가 있는 경우 When Enter 키를 누르면 Then 마우스 클릭과 동일하게 클립보드 복사가 실행된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        const writeTextMock = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, {
+          clipboard: {
+            writeText: writeTextMock,
+          },
+        });
+
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          onMessage('키보드 복사 답변');
+          onDone();
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+        await act(async () => {
+          fireEvent.click(chatOpenBtn);
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '키보드 엔터 질문' } });
+          fireEvent.click(sendBtn);
+        });
+
+        const copyBtn = screen.getByRole('button', { name: /답변 복사/i });
+
+        await act(async () => {
+          fireEvent.keyDown(copyBtn, { key: 'Enter', code: 'Enter' });
+          fireEvent.click(copyBtn);
+        });
+
+        expect(writeTextMock).toHaveBeenCalledWith('키보드 복사 답변');
+        expect(copyBtn).toHaveTextContent('복사됨');
+      });
     });
   });
 

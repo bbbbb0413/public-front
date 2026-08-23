@@ -58,6 +58,25 @@ export const AiService = () => {
   const [sessions, setSessions] = useState<SessionOut[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
 
+  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopyAnswer = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopiedIndex(null);
+      }, 2000);
+    } catch {
+      setErrorMsg('답변 복사에 실패했습니다.');
+    }
+  };
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,8 +93,6 @@ export const AiService = () => {
     }
   };
 
-  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
-
   const toggleSourceExpand = (index: number) => {
     setExpandedSources((prev) => ({
       ...prev,
@@ -90,6 +107,7 @@ export const AiService = () => {
     setCurrentSources([]);
     setExpandedSources({});
     setCurrentProgress(null);
+    setCopiedIndex(null);
   };
 
   const handleLoadSession = async (sid: string) => {
@@ -107,6 +125,7 @@ export const AiService = () => {
       setCurrentSources([]);
       setExpandedSources({});
       setCurrentProgress(null);
+      setCopiedIndex(null);
     } catch {
       setErrorMsg('세션을 불러오는 데 실패했습니다.');
     }
@@ -476,6 +495,16 @@ export const AiService = () => {
                               </ul>
                             </div>
                           )}
+                          <div className="message-actions">
+                            <button
+                              type="button"
+                              className="btn-copy-answer"
+                              onClick={() => handleCopyAnswer(msg.text, idx)}
+                              aria-label="답변 복사"
+                            >
+                              {copiedIndex === idx ? '복사됨' : '복사'}
+                            </button>
+                          </div>
                         </>
                       ) : (
                         msg.text

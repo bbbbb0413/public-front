@@ -464,6 +464,40 @@
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.btn-copy-answer {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: hsl(210, 15%, 80%);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: inherit;
+}
+
+.btn-copy-answer:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-copy-answer:focus-visible {
+  outline: 2px solid hsl(265, 80%, 65%);
+  outline-offset: 1px;
+}
+
 .cursor {
   display: inline-block;
   font-weight: 700;
