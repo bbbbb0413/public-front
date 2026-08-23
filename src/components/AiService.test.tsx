@@ -867,4 +867,207 @@ describe('AiService Component', () => {
       expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
     });
   });
+
+  describe('Done event metadata (SPEC-010)', () => {
+    it('Given 프론트엔드가 done 이벤트로 { confidence: 0.9, missing: [] } 페이로드를 수신한 상황 When 스트리밍이 종료되고 답변 메시지가 렌더링될 때 Then AI 메시지 버블에 신뢰도 90% 뱃지가 올바르게 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('최종 답변 내용입니다.');
+            onDone({ confidence: 0.9, missing: [] });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '신뢰도 90% 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('90%')).toBeInTheDocument();
+      expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+    });
+
+    it('Given done 이벤트에 confidence와 missing 메타데이터가 있고 중간 progress와 다른 경우 When 완료되면 Then done 이벤트의 메타데이터가 AI 메시지 버블에 우선 적용된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          _onSources,
+          _sessionId,
+          _onSessionId,
+          onProgress,
+        ) => {
+          setTimeout(() => {
+            onProgress?.({
+              iteration: 1,
+              phase: 'critiquing',
+              confidence: 0.5,
+              missing: ['이전 누락 정보'],
+            });
+            onMessage('최종 보완 답변');
+            onDone({ confidence: 0.85, missing: ['추가 설명'] });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '우선순위 검증 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('85%')).toBeInTheDocument();
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('추가 설명')).toBeInTheDocument();
+      expect(screen.queryByText('이전 누락 정보')).not.toBeInTheDocument();
+    });
+
+    it('Given done 이벤트 페이로드가 비어있거나 null인 응답 When 스트리밍이 완료되면 Then 기존 lastProgress가 적용된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          _onSources,
+          _sessionId,
+          _onSessionId,
+          onProgress,
+        ) => {
+          setTimeout(() => {
+            onProgress?.({
+              iteration: 1,
+              phase: 'critiquing',
+              confidence: 0.75,
+              missing: ['대체 누락 정보'],
+            });
+            onMessage('레거시 완료 답변');
+            onDone(undefined);
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '레거시 done 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('75%')).toBeInTheDocument();
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('대체 누락 정보')).toBeInTheDocument();
+    });
+
+    it('Given 단발성 비에이전틱 질의를 수행하여 신뢰도 평가 메타데이터가 없는 상황 When done 이벤트가 수신되면 Then 신뢰도 뱃지 없이 답변 내용만 정상 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('단발성 답변 내용입니다.');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '단발성 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.queryByTestId('confidence-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+      expect(screen.getAllByText('단발성 답변 내용입니다.').length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

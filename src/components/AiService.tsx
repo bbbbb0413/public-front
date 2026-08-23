@@ -236,14 +236,18 @@ export const AiService = () => {
         accumulated += token;
         setStreamingAnswer(accumulated);
       },
-      () => {
+      (finalMeta) => {
+        const confidence =
+          finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
+        const missing =
+          finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
         setChatLog((prev) => [
           ...prev,
           {
             sender: 'ai',
             text: accumulated,
-            confidence: lastProgress?.confidence,
-            missing: lastProgress?.missing,
+            confidence,
+            missing,
           },
         ]);
         setStreamingAnswer('');
