@@ -322,4 +322,107 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onMessage).toHaveBeenCalledWith('응답');
     expect(onDone).toHaveBeenCalled();
   });
+
+  it('askQuestionStream should pass final metadata to onDone when done event contains data', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-done-meta' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"token","data":"응답 완료"}\n\n',
+      'id: 2\ndata: {"type":"done","data":{"confidence":0.85,"missing":["추가 설명"]}}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream('Test question', onMessage, onDone, onError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).toHaveBeenCalledWith({
+      confidence: 0.85,
+      missing: ['추가 설명'],
+    });
+  });
+
+  it('askQuestionStream should parse stringified JSON in done event data and pass to onDone', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-done-meta-str' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"done","data":"{\\"confidence\\":0.9,\\"missing\\":[]}"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream('Test question', onMessage, onDone, onError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).toHaveBeenCalledWith({
+      confidence: 0.9,
+      missing: [],
+    });
+  });
+
+  it('askQuestionStream should pass undefined to onDone when done event has no data or legacy response', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-done-empty' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"done"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream('Test question', onMessage, onDone, onError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).toHaveBeenCalledWith(undefined);
+  });
 });

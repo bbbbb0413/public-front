@@ -95,7 +95,7 @@ const parseSseEvent = (block: string): { type: string; data: unknown } | null =>
 export const askQuestionStream = async (
   question: string,
   onMessage: (text: string) => void,
-  onDone: () => void,
+  onDone: (finalMeta?: { confidence?: number; missing?: string[] }) => void,
   onError: (err: unknown) => void,
   _userId?: string | null,
   chatLog?: Array<{ sender: string; text: string }>,
@@ -160,7 +160,19 @@ export const askQuestionStream = async (
       } else if (event.type === 'token') {
         onMessage(event.data as string);
       } else if (event.type === 'done') {
-        onDone();
+        let finalMeta: { confidence?: number; missing?: string[] } | undefined = undefined;
+        if (event.data) {
+          if (typeof event.data === 'string') {
+            try {
+              finalMeta = JSON.parse(event.data);
+            } catch {
+              // 파싱 실패 시 무시
+            }
+          } else if (typeof event.data === 'object') {
+            finalMeta = event.data as { confidence?: number; missing?: string[] };
+          }
+        }
+        onDone(finalMeta);
         return true;
       } else if (event.type === 'error') {
         onError(new Error((event.data as string) ?? '알 수 없는 오류'));
