@@ -79,7 +79,29 @@ describe('AI Service API (Gateway 경유)', () => {
   });
 
   it('getSessionDetail should fetch a session by id via gateway', async () => {
-    const mockDetail = { sessionId: 's1', title: 'hi', turns: [], createdAt: 'x', updatedAt: 'x' };
+    const mockDetail = {
+      sessionId: 's1',
+      title: 'hi',
+      turns: [
+        {
+          role: 'user' as const,
+          content: '질문',
+          createdAt: '2026-08-25T01:00:00Z',
+        },
+        {
+          role: 'assistant' as const,
+          content: '답변',
+          createdAt: '2026-08-25T01:00:01Z',
+          confidence: 0.9,
+          missing: ['정보1'],
+          sources: [
+            { fileName: 'doc.pdf', chunkIndex: 0, documentId: 'd1', snippet: '스니펫' },
+          ],
+        },
+      ],
+      createdAt: 'x',
+      updatedAt: 'x',
+    };
     mockAxios.get.mockResolvedValueOnce({ data: mockDetail });
 
     const result = await getSessionDetail('s1');
