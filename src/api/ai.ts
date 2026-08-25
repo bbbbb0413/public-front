@@ -7,15 +7,115 @@ export const getDocuments = async () => {
   return response.data;
 };
 
-export const uploadDocument = async (file: File) => {
+export interface UploadDocumentResponse {
+  jobId: string;
+}
+
+export const uploadDocument = async (file: File): Promise<UploadDocumentResponse> => {
   const formData = new FormData();
   formData.append('file', file);
-  const response = await client.post('/ai/knowledge/jobs', formData, {
+  const response = await client.post<UploadDocumentResponse>('/ai/knowledge/jobs', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
   });
   return response.data;
+};
+
+export const subscribeIngestJob = (
+  jobId: string,
+  callbacks: { onDone?: () => void; onError?: (error: string) => void },
+): (() => void) => {
+  const controller = new AbortController();
+  let isClosed = false;
+
+  const close = () => {
+    if (isClosed) return;
+    isClosed = true;
+    controller.abort();
+  };
+
+  const run = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${jobId}/stream`, {
+        method: 'GET',
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+          Accept: 'text/event-stream',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('ReadableStream not supported');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const handleBlock = (block: string): boolean => {
+        const event = parseSseEvent(block);
+        if (!event) return false;
+
+        if (event.type === 'done') {
+          close();
+          callbacks.onDone?.();
+          return true;
+        } else if (event.type === 'error') {
+          close();
+          let errorMessage = '인제스트 처리 중 오류가 발생했습니다.';
+          if (typeof event.data === 'string') {
+            errorMessage = event.data;
+          } else if (event.data && typeof event.data === 'object') {
+            const dataObj = event.data as Record<string, unknown>;
+            if (typeof dataObj.error === 'string') {
+              errorMessage = dataObj.error;
+            } else if (typeof dataObj.message === 'string') {
+              errorMessage = dataObj.message;
+            }
+          }
+          callbacks.onError?.(errorMessage);
+          return true;
+        }
+        return false;
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          if (handleBlock(block)) return;
+        }
+      }
+
+      if (buffer.trim()) {
+        handleBlock(buffer);
+      }
+    } catch (err: unknown) {
+      if (isClosed || (err instanceof DOMException && err.name === 'AbortError')) {
+        return;
+      }
+      close();
+      const message = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+      callbacks.onError?.(message);
+    }
+  };
+
+  run();
+
+  return close;
 };
 
 export const deleteDocument = async (id: string) => {
