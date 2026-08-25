@@ -119,10 +119,15 @@ export const AiService = () => {
       const loaded: ChatMessage[] = detail.turns.map((t) => ({
         sender: t.role === 'user' ? 'user' : 'ai',
         text: t.content,
+        confidence: t.confidence,
+        missing: t.missing,
       }));
       setChatLog(loaded);
       setStreamingAnswer('');
-      setCurrentSources([]);
+      const lastAiTurnWithSources = [...detail.turns]
+        .reverse()
+        .find((t) => t.role === 'assistant' && t.sources && t.sources.length > 0);
+      setCurrentSources(lastAiTurnWithSources?.sources ?? []);
       setExpandedSources({});
       setCurrentProgress(null);
       setCopiedIndex(null);

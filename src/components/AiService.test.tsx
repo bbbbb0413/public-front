@@ -2,6 +2,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { AiService } from './AiService';
+import { AuthContext } from '../context/AuthContext';
 import * as aiApi from '../api/ai';
 
 vi.mock('../api/ai', () => {
@@ -11,6 +12,7 @@ vi.mock('../api/ai', () => {
     deleteDocument: vi.fn(),
     askQuestionStream: vi.fn(),
     getSessions: vi.fn().mockResolvedValue([]),
+    getSessionDetail: vi.fn(),
     deleteSessionById: vi.fn(),
   };
 });
@@ -290,6 +292,10 @@ describe('AiService Component', () => {
   it('displays iteration and phase during streaming and shows confidence & missing items when completed', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
+    let triggerSearching: () => void;
+    let triggerRefining: () => void;
+    let triggerDone: () => void;
+
     vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
       (
         _question,
@@ -303,16 +309,16 @@ describe('AiService Component', () => {
         _onSessionId,
         onProgress,
       ) => {
-        setTimeout(() => {
+        triggerSearching = () => {
           onProgress?.({
             iteration: 1,
             phase: 'searching',
             confidence: 0,
             missing: [],
           });
-        }, 20);
+        };
 
-        setTimeout(() => {
+        triggerRefining = () => {
           onProgress?.({
             iteration: 2,
             phase: 'refining',
@@ -320,11 +326,11 @@ describe('AiService Component', () => {
             missing: ['결제 취소 정책'],
           });
           onMessage('답변 완료되었습니다.');
-        }, 80);
+        };
 
-        setTimeout(() => {
+        triggerDone = () => {
           onDone();
-        }, 150);
+        };
 
         return Promise.resolve();
       },
@@ -349,7 +355,7 @@ describe('AiService Component', () => {
 
     // 1회차 searching 진행 중 확인
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      triggerSearching();
     });
     expect(screen.getByTestId('agent-progress')).toBeInTheDocument();
     expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
@@ -357,14 +363,14 @@ describe('AiService Component', () => {
 
     // 2회차 refining 진행 중 확인
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      triggerRefining();
     });
     expect(screen.getByText(/반복 2회차/i)).toBeInTheDocument();
     expect(screen.getByText('답변을 보완하고 다듬는 중')).toBeInTheDocument();
 
-    // 완료 후 대기
+    // 완료 후 확인
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      triggerDone();
     });
 
     // 진행 상태 바는 사라짐
@@ -381,6 +387,9 @@ describe('AiService Component', () => {
   it('Given 에이전틱 루프가 2회 반복하는 질문 When 사용자가 질문하면 Then 화면에 반복 회차와 현재 단계가 순서대로 표시된다', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
+    let triggerSearching: () => void;
+    let triggerCritiquing: () => void;
+
     vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
       (
         _question,
@@ -394,23 +403,23 @@ describe('AiService Component', () => {
         _onSessionId,
         onProgress,
       ) => {
-        setTimeout(() => {
+        triggerSearching = () => {
           onProgress?.({
             iteration: 1,
             phase: 'searching',
             confidence: 0,
             missing: [],
           });
-        }, 10);
+        };
 
-        setTimeout(() => {
+        triggerCritiquing = () => {
           onProgress?.({
             iteration: 2,
             phase: 'critiquing',
             confidence: 0.7,
             missing: [],
           });
-        }, 30);
+        };
 
         return Promise.resolve();
       },
@@ -434,13 +443,13 @@ describe('AiService Component', () => {
     });
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      triggerSearching();
     });
     expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
     expect(screen.getByText('관련 문서를 찾는 중')).toBeInTheDocument();
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      triggerCritiquing();
     });
     expect(screen.getByText(/반복 2회차/i)).toBeInTheDocument();
     expect(screen.getByText('답변을 검토하고 평가하는 중')).toBeInTheDocument();
@@ -448,6 +457,9 @@ describe('AiService Component', () => {
 
   it('Given 루프가 1회로 끝나는 단순한 질문 When 답변이 완료되면 Then 진행 표시가 사라지고 최종 신뢰도가 답변 옆에 남는다', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+    let triggerGenerating: () => void;
+    let triggerDone: () => void;
 
     vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
       (
@@ -462,7 +474,7 @@ describe('AiService Component', () => {
         _onSessionId,
         onProgress,
       ) => {
-        setTimeout(() => {
+        triggerGenerating = () => {
           onProgress?.({
             iteration: 1,
             phase: 'generating',
@@ -470,11 +482,11 @@ describe('AiService Component', () => {
             missing: [],
           });
           onMessage('단순 답변입니다.');
-        }, 10);
+        };
 
-        setTimeout(() => {
+        triggerDone = () => {
           onDone();
-        }, 30);
+        };
 
         return Promise.resolve();
       },
@@ -498,13 +510,13 @@ describe('AiService Component', () => {
     });
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      triggerGenerating();
     });
     expect(screen.getByText(/반복 1회차/i)).toBeInTheDocument();
     expect(screen.getByText('답변을 생성하는 중')).toBeInTheDocument();
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      triggerDone();
     });
 
     expect(screen.queryByTestId('agent-progress')).not.toBeInTheDocument();
@@ -1332,4 +1344,262 @@ describe('AiService Component', () => {
       expect(screen.getAllByText('단발성 답변 내용입니다.').length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('Session Metadata Restoration (SPEC-011)', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 출처 문서 2개가 포함된 RAG 답변이 세션에 저장된 상황 When 사용자가 세션을 클릭하여 복원하면 Then 채팅 화면에 신뢰도 뱃지 및 출처 2개가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-1', title: '복원 세션 1', updatedAt: '2026-08-25T01:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-1',
+        title: '복원 세션 1',
+        createdAt: '2026-08-25T01:00:00Z',
+        updatedAt: '2026-08-25T01:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '환불 규정 알려줘',
+            createdAt: '2026-08-25T01:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '환불은 7일 이내 가능합니다.',
+            createdAt: '2026-08-25T01:00:01Z',
+            confidence: 0.92,
+            missing: ['예외 규정'],
+            sources: [
+              { fileName: 'refund_policy.pdf', chunkIndex: 0, documentId: 'doc-1', snippet: '환불 정책 본문' },
+              { fileName: 'terms.pdf', chunkIndex: 2, documentId: 'doc-2', snippet: '이용약관 본문' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 채팅 모달 열기
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 세션 목록에서 세션 클릭
+      const sessionItem = screen.getByText('복원 세션 1');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-1');
+
+      // 이전 대화 내용 표시 확인
+      expect(screen.getByText('환불 규정 알려줘')).toBeInTheDocument();
+      expect(screen.getAllByText('환불은 7일 이내 가능합니다.').length).toBeGreaterThanOrEqual(1);
+
+      // 신뢰도 뱃지 및 확인하지 못한 항목 표시 확인
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('92%')).toBeInTheDocument();
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('예외 규정')).toBeInTheDocument();
+
+      // 참고 문서 목록 2개 표시 확인
+      expect(screen.getByText('refund_policy.pdf')).toBeInTheDocument();
+      expect(screen.getByText('terms.pdf')).toBeInTheDocument();
+    });
+
+    it('Given 메타데이터가 없는 레거시 세션 데이터 When 세션을 복원하면 Then 에러 없이 텍스트가 렌더링되고 출처 목록은 빈 상태로 유지된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-legacy', title: '레거시 세션', updatedAt: '2026-08-25T01:00:00Z' },
+      ]);
+
+      const mockLegacyDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-legacy',
+        title: '레거시 세션',
+        createdAt: '2026-08-25T01:00:00Z',
+        updatedAt: '2026-08-25T01:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '레거시 질문',
+            createdAt: '2026-08-25T01:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '레거시 답변',
+            createdAt: '2026-08-25T01:00:01Z',
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockLegacyDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('레거시 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getByText('레거시 질문')).toBeInTheDocument();
+      expect(screen.getAllByText('레거시 답변').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByTestId('confidence-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+      expect(screen.queryByText('참고 문서')).not.toBeInTheDocument();
+    });
+
+    it('Given 여러 턴의 대화가 있는 세션 When 복원하면 Then 마지막 AI 턴의 출처가 참고 문서 영역에 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-multi', title: '멀티턴 세션', updatedAt: '2026-08-25T01:00:00Z' },
+      ]);
+
+      const mockMultiTurnDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-multi',
+        title: '멀티턴 세션',
+        createdAt: '2026-08-25T01:00:00Z',
+        updatedAt: '2026-08-25T01:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '첫 번째 질문',
+            createdAt: '2026-08-25T01:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '첫 번째 답변',
+            createdAt: '2026-08-25T01:00:01Z',
+            confidence: 0.8,
+            sources: [
+              { fileName: 'turn1_doc.pdf', chunkIndex: 0, documentId: 'doc-t1' },
+            ],
+          },
+          {
+            role: 'user',
+            content: '두 번째 질문',
+            createdAt: '2026-08-25T01:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '두 번째 답변',
+            createdAt: '2026-08-25T01:00:03Z',
+            confidence: 0.95,
+            sources: [
+              { fileName: 'turn2_doc.pdf', chunkIndex: 1, documentId: 'doc-t2' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockMultiTurnDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('멀티턴 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 첫 번째 및 두 번째 턴의 신뢰도 뱃지 모두 렌더링 확인
+      expect(screen.getByText('80%')).toBeInTheDocument();
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      // 마지막 AI 턴의 출처가 표시되고 이전 AI 턴의 출처는 참고 문서 목록에 노출되지 않음
+      expect(screen.getByText('turn2_doc.pdf')).toBeInTheDocument();
+      expect(screen.queryByText('turn1_doc.pdf')).not.toBeInTheDocument();
+    });
+
+    it('Given 사용자가 질문만 입력하고 백엔드 처리가 중단되거나 출처 검색 결과가 0건인 대화 턴 When 세션을 저장 및 복원하면 Then sources 가 빈 배열 또는 undefined 로 안전하게 처리된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-empty-sources', title: '출처 없는 세션', updatedAt: '2026-08-25T01:00:00Z' },
+      ]);
+
+      const mockEmptySourcesDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-empty-sources',
+        title: '출처 없는 세션',
+        createdAt: '2026-08-25T01:00:00Z',
+        updatedAt: '2026-08-25T01:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '답변 중단 질문',
+            createdAt: '2026-08-25T01:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '출처가 없는 일반 답변입니다.',
+            createdAt: '2026-08-25T01:00:01Z',
+            confidence: 0.5,
+            sources: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockEmptySourcesDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('출처 없는 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 대화 내용 및 신뢰도 표시
+      expect(screen.getByText('답변 중단 질문')).toBeInTheDocument();
+      expect(screen.getAllByText('출처가 없는 일반 답변입니다.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('50%')).toBeInTheDocument();
+
+      // sources가 빈 배열이므로 참고 문서 섹션이 렌더링되지 않음을 확인
+      expect(screen.queryByText('참고 문서')).not.toBeInTheDocument();
+    });
+  });
 });
+

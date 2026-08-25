@@ -49,6 +49,9 @@ export interface SessionTurn {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  sources?: SourceRef[];
+  confidence?: number;
+  missing?: string[];
 }
 
 export interface SessionDetailOut {
