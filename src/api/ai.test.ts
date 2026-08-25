@@ -22,6 +22,7 @@ import {
   getSessions,
   getSessionDetail,
   deleteSessionById,
+  subscribeIngestJob,
 } from './ai';
 
 const mockAxios = axios as unknown as {
@@ -92,6 +93,144 @@ describe('AI Service API (Gateway 경유)', () => {
 
     await deleteSessionById('s1');
     expect(mockAxios.delete).toHaveBeenCalledWith('/ai/rag/sessions/s1');
+  });
+
+  it('subscribeIngestJob should connect to SSE stream and invoke onDone when done event is received', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"progress","data":"processing"}\n\n',
+      'id: 2\ndata: {"type":"done","data":{"documentId":"doc-1"}}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      body: stream,
+      headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    const unsubscribe = subscribeIngestJob('job-ingest-1', { onDone, onError });
+
+    expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3000/ai/jobs/job-ingest-1/stream', {
+      method: 'GET',
+      headers: {
+        Authorization: 'Bearer jwt-token',
+        Accept: 'text/event-stream',
+      },
+      signal: expect.any(AbortSignal),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(typeof unsubscribe).toBe('function');
+  });
+
+  it('subscribeIngestJob should invoke onError when error event is received with object payload', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"error","data":{"error":"파싱 실패"}}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      body: stream,
+      headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    subscribeIngestJob('job-ingest-err', { onDone, onError });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('파싱 실패');
+  });
+
+  it('subscribeIngestJob should invoke onError when error event is received with string payload', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"error","data":"인제스트 실패"}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      body: stream,
+      headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    subscribeIngestJob('job-ingest-err-str', { onDone, onError });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith('인제스트 실패');
+  });
+
+  it('subscribeIngestJob unsubscribe should abort fetch stream', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    const stream = new ReadableStream({
+      start() {},
+    });
+
+    let abortSignal: AbortSignal | undefined;
+    const fetchSpy = vi.fn().mockImplementation((_url, options) => {
+      abortSignal = options?.signal;
+      return Promise.resolve({
+        ok: true,
+        body: stream,
+        headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    const unsubscribe = subscribeIngestJob('job-cancel', { onDone, onError });
+    unsubscribe();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(abortSignal?.aborted).toBe(true);
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it('askQuestionStream should create a job then subscribe to the SSE stream and call callbacks', async () => {

@@ -12,6 +12,7 @@ vi.mock('../api/ai', () => {
     askQuestionStream: vi.fn(),
     getSessions: vi.fn().mockResolvedValue([]),
     deleteSessionById: vi.fn(),
+    subscribeIngestJob: vi.fn(),
   };
 });
 
@@ -38,7 +39,7 @@ describe('AiService Component', () => {
 
   it('uploads a file and refreshes document list', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
-    vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ id: 'doc-2', fileName: 'new.txt', status: 'processed' });
+    vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'doc-2' });
 
     await act(async () => {
       render(<AiService />);
@@ -214,7 +215,7 @@ describe('AiService Component', () => {
 
   it('successfully uploads a valid 5MB manual.txt file and displays no error', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
-    vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ id: 'doc-3', fileName: 'manual.txt', status: 'processed' });
+    vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'doc-3' });
 
     await act(async () => {
       render(<AiService />);
@@ -865,6 +866,161 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
+    });
+  });
+
+  describe('Document Ingest SSE Subscription (SPEC-012)', () => {
+    it('Given 사용자가 유효한 문서를 업로드했을 때 When 백엔드가 jobId를 응답하고 done 이벤트를 발행하면 Then 즉시 fetchDocuments를 호출하고 스트림을 종료한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-123' });
+
+      let capturedCallbacks: { onDone?: () => void; onError?: (error: string) => void } = {};
+      const mockClose = vi.fn();
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation((_jobId, callbacks) => {
+        capturedCallbacks = callbacks;
+        return mockClose;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
+      expect(aiApi.subscribeIngestJob).toHaveBeenCalledWith('job-123', expect.any(Object));
+
+      // done 이벤트 발생 시뮬레이션
+      const initialCallCount = vi.mocked(aiApi.getDocuments).mock.calls.length;
+      await act(async () => {
+        capturedCallbacks.onDone?.();
+      });
+
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(initialCallCount + 1);
+      expect(mockClose).toHaveBeenCalled();
+    });
+
+    it('Given 사용자가 문서를 업로드했으나 백엔드 처리 중 오류가 발생했을 때 When error 이벤트를 발행하면 Then 즉시 스트림을 닫고 에러 배너에 해당 오류 메시지를 표시한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-err-456' });
+
+      let capturedCallbacks: { onDone?: () => void; onError?: (error: string) => void } = {};
+      const mockClose = vi.fn();
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation((_jobId, callbacks) => {
+        capturedCallbacks = callbacks;
+        return mockClose;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(aiApi.subscribeIngestJob).toHaveBeenCalledWith('job-err-456', expect.any(Object));
+
+      // error 이벤트 수신 시뮬레이션
+      await act(async () => {
+        capturedCallbacks.onError?.('파싱 실패');
+      });
+
+      expect(mockClose).toHaveBeenCalled();
+      expect(screen.getByText('파싱 실패')).toBeInTheDocument();
+    });
+
+    it('Given 업로드 후 응답에 jobId가 없거나 빈 값인 경우 When handleFileUpload가 실행되면 Then SSE 구독을 시도하지 않고 안전하게 fetchDocuments를 호출한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: '' });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const initialCallCount = vi.mocked(aiApi.getDocuments).mock.calls.length;
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
+      expect(aiApi.subscribeIngestJob).not.toHaveBeenCalled();
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(initialCallCount + 1);
+    });
+
+    it('Given SSE 연결이 15초 동안 유지되는 경우 When 타임아웃되면 Then SSE 연결을 닫고 최종 1회 fetchDocuments를 호출한다', async () => {
+      vi.useFakeTimers();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-timeout' });
+
+      const mockClose = vi.fn();
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation(() => mockClose);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(aiApi.subscribeIngestJob).toHaveBeenCalledWith('job-timeout', expect.any(Object));
+      const beforeTimeoutCallCount = vi.mocked(aiApi.getDocuments).mock.calls.length;
+
+      // 15초 경과
+      await act(async () => {
+        vi.advanceTimersByTime(15000);
+      });
+
+      expect(mockClose).toHaveBeenCalled();
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(beforeTimeoutCallCount + 1);
+
+      vi.useRealTimers();
+    });
+
+    it('Given 컴포넌트 언마운트 시 When 활성화된 SSE 구독이 있으면 Then 연결을 정상 해제하여 메모리 누수를 방지한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-unmount' });
+
+      const mockClose = vi.fn();
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation(() => mockClose);
+
+      let unmountFn: () => void = () => {};
+      await act(async () => {
+        const { unmount } = render(<AiService />);
+        unmountFn = unmount;
+      });
+
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(aiApi.subscribeIngestJob).toHaveBeenCalledWith('job-unmount', expect.any(Object));
+      expect(mockClose).not.toHaveBeenCalled();
+
+      // 언마운트
+      await act(async () => {
+        unmountFn();
+      });
+
+      expect(mockClose).toHaveBeenCalled();
     });
   });
 });

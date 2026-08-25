@@ -7,6 +7,7 @@ import {
   askQuestionStream,
   getSessions,
   deleteSessionById,
+  subscribeIngestJob,
   SourceRef,
   SessionOut,
   AgentProgress,
@@ -60,6 +61,7 @@ export const AiService = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const activeSubscriptionsRef = useRef<Set<() => void>>(new Set());
 
   const fetchSessions = async () => {
     if (!userId) return;
@@ -141,6 +143,14 @@ export const AiService = () => {
   }, []);
 
   useEffect(() => {
+    const subscriptions = activeSubscriptionsRef.current;
+    return () => {
+      subscriptions.forEach((cleanup) => cleanup());
+      subscriptions.clear();
+    };
+  }, []);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatLog, streamingAnswer, currentProgress]);
 
@@ -181,18 +191,47 @@ export const AiService = () => {
     setUploading(true);
     setErrorMsg('');
     try {
-      await uploadDocument(file);
-      await fetchDocuments();
-      // 인제스트 완료될 때까지 3초마다 폴링 (최대 30초)
-      const poll = setInterval(async () => {
-        const docs: DocumentInfo[] = (await getDocuments()) || [];
-        setDocuments(docs);
-        const pending = docs.some((d) =>
-          ['PENDING', 'PROCESSING'].includes(d.status.toUpperCase()),
-        );
-        if (!pending) clearInterval(poll);
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 30000);
+      const res = await uploadDocument(file);
+      const jobId = res?.jobId;
+      if (!jobId) {
+        await fetchDocuments();
+        return;
+      }
+
+      let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      let cleanupFn: (() => void) | null = null;
+
+      const finishSubscription = () => {
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+          timeoutTimer = null;
+        }
+        if (cleanupFn) {
+          activeSubscriptionsRef.current.delete(cleanupFn);
+          cleanupFn();
+          cleanupFn = null;
+        }
+      };
+
+      timeoutTimer = setTimeout(() => {
+        finishSubscription();
+        fetchDocuments();
+      }, 15000);
+
+      cleanupFn = subscribeIngestJob(jobId, {
+        onDone: () => {
+          finishSubscription();
+          fetchDocuments();
+        },
+        onError: (err) => {
+          finishSubscription();
+          setErrorMsg(err || '인제스트 처리에 실패했습니다.');
+        },
+      });
+
+      if (cleanupFn) {
+        activeSubscriptionsRef.current.add(cleanupFn);
+      }
     } catch (error) {
       const err = error as { response?: { data?: { message?: unknown } } };
       const serverMessage = err.response?.data?.message;
