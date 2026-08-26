@@ -1879,6 +1879,60 @@ describe('AiService Component', () => {
 
       expect(mockCancel).toHaveBeenCalled();
     });
+
+    it('Given 질문 입력창이 비어있거나 스트리밍 중이 아닌 일반 상태일 때 When 화면을 확인하면 Then 중단 버튼은 노출되지 않고 전송 버튼만 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      expect(screen.getByRole('button', { name: /전송/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /중단/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 스트리밍이 이미 정상 완료된 상태에서 When 사용자가 중단을 호출하거나 종료되면 Then 정상 상태를 유지한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockCancel = vi.fn().mockResolvedValue(undefined);
+
+      let emitDone: () => void = () => {};
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onDone = args[2];
+        emitDone = onDone;
+        return Object.assign(Promise.resolve(), { cancel: mockCancel });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '완료 경계 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 정상 완료 이벤트 발생
+      await act(async () => {
+        emitDone();
+      });
+
+      expect(screen.getByRole('button', { name: /전송/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /중단/i })).not.toBeInTheDocument();
+      expect(mockCancel).not.toHaveBeenCalled();
+    });
   });
 });
 
