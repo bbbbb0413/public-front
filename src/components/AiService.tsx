@@ -81,6 +81,8 @@ export const AiService = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const activeSubscriptionsRef = useRef<Set<() => void>>(new Set());
+  const activeStreamCancelRef = useRef<(() => Promise<void>) | null>(null);
+  const streamingAnswerRef = useRef<string>('');
 
   const fetchSessions = async () => {
     if (!userId) return;
@@ -106,6 +108,7 @@ export const AiService = () => {
     setSessionId(null);
     setChatLog([]);
     setStreamingAnswer('');
+    streamingAnswerRef.current = '';
     setCurrentSources([]);
     setExpandedSources({});
     setCurrentProgress(null);
@@ -126,6 +129,7 @@ export const AiService = () => {
       }));
       setChatLog(loaded);
       setStreamingAnswer('');
+      streamingAnswerRef.current = '';
       const lastAiTurnWithSources = [...detail.turns]
         .reverse()
         .find((t) => t.role === 'assistant' && t.sources && t.sources.length > 0);
@@ -143,7 +147,9 @@ export const AiService = () => {
     try {
       await deleteSessionById(sid);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sid));
-      if (sessionId === sid) handleNewChat();
+      if (sessionId === sid) {
+        handleNewChat();
+      }
     } catch {
       setErrorMsg('세션 삭제에 실패했습니다.');
     }
@@ -171,6 +177,10 @@ export const AiService = () => {
     return () => {
       subscriptions.forEach((cleanup) => cleanup());
       subscriptions.clear();
+      if (activeStreamCancelRef.current) {
+        activeStreamCancelRef.current();
+        activeStreamCancelRef.current = null;
+      }
     };
   }, []);
 
@@ -276,6 +286,28 @@ export const AiService = () => {
     }
   };
 
+  const handleCancelStreaming = async () => {
+    if (activeStreamCancelRef.current) {
+      await activeStreamCancelRef.current();
+      activeStreamCancelRef.current = null;
+    }
+
+    const currentText = streamingAnswerRef.current;
+    if (currentText) {
+      setChatLog((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: currentText,
+        },
+      ]);
+    }
+    setStreamingAnswer('');
+    streamingAnswerRef.current = '';
+    setCurrentProgress(null);
+    setIsStreaming(false);
+  };
+
   const handleSendQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!question.trim() || isStreaming) return;
@@ -286,6 +318,7 @@ export const AiService = () => {
     setChatLog((prev) => [...prev, { sender: 'user', text: currentQuestion }]);
     setIsStreaming(true);
     setStreamingAnswer('');
+    streamingAnswerRef.current = '';
     setCurrentSources([]);
     setExpandedSources({});
     setCurrentProgress(null);
@@ -293,13 +326,15 @@ export const AiService = () => {
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
 
-    await askQuestionStream(
+    const handle = askQuestionStream(
       currentQuestion,
       (token) => {
         accumulated += token;
+        streamingAnswerRef.current = accumulated;
         setStreamingAnswer(accumulated);
       },
       (finalMeta) => {
+        activeStreamCancelRef.current = null;
         const confidence =
           finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing =
@@ -314,12 +349,15 @@ export const AiService = () => {
           },
         ]);
         setStreamingAnswer('');
+        streamingAnswerRef.current = '';
         setCurrentProgress(null);
         setIsStreaming(false);
         if (userId) fetchSessions();
       },
       () => {
+        activeStreamCancelRef.current = null;
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
+        streamingAnswerRef.current = '';
         setCurrentProgress(null);
         setIsStreaming(false);
       },
@@ -333,6 +371,8 @@ export const AiService = () => {
         setCurrentProgress(progress);
       },
     );
+
+    activeStreamCancelRef.current = handle?.cancel ?? null;
   };
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
@@ -641,13 +681,23 @@ export const AiService = () => {
                   disabled={isStreaming}
                   className="chat-input"
                 />
-                <button
-                  type="submit"
-                  disabled={isStreaming || !question.trim()}
-                  className="chat-send-btn"
-                >
-                  {isStreaming ? '답변 중...' : '전송'}
-                </button>
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={handleCancelStreaming}
+                    className="chat-cancel-btn"
+                  >
+                    중단
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!question.trim()}
+                    className="chat-send-btn"
+                  >
+                    전송
+                  </button>
+                )}
               </form>
             </div>
           </div>
