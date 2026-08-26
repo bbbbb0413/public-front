@@ -1757,5 +1757,128 @@ describe('AiService Component', () => {
       expect(mockClose).toHaveBeenCalled();
     });
   });
+
+  describe('Answer Cancel Integration (SPEC-015)', () => {
+    it('Given 스트리밍 진행 중일 때 When 입력 폼을 확인하면 Then 전송 버튼 대신 클릭 가능한 중단 버튼이 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockCancel = vi.fn().mockResolvedValue(undefined);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return Object.assign(Promise.resolve(), { cancel: mockCancel });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '긴 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.queryByRole('button', { name: /전송/i })).not.toBeInTheDocument();
+      const cancelBtn = screen.getByRole('button', { name: /중단/i });
+      expect(cancelBtn).toBeInTheDocument();
+      expect(cancelBtn).not.toBeDisabled();
+    });
+
+    it('Given 스트리밍 중 사용자가 중단 버튼을 클릭했을 때 When 중단이 처리되면 Then cancel이 호출되고 지금까지 수신된 텍스트가 채팅 기록에 보존되며 isStreaming이 해제된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockCancel = vi.fn().mockResolvedValue(undefined);
+
+      let emitToken: (token: string) => void;
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        emitToken = onMessage;
+        return Object.assign(Promise.resolve(), { cancel: mockCancel });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '중단 테스트 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 토큰 2개 수신
+      await act(async () => {
+        emitToken('부분 답변');
+        emitToken(' 생성 중...');
+      });
+
+      expect(screen.getAllByText('부분 답변 생성 중...').length).toBeGreaterThanOrEqual(1);
+
+      // 중단 버튼 클릭
+      const cancelBtn = screen.getByRole('button', { name: /중단/i });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(mockCancel).toHaveBeenCalled();
+
+      // 지금까지 수신된 답변이 채팅 로그에 보존됨
+      expect(screen.getAllByText('부분 답변 생성 중...').length).toBeGreaterThanOrEqual(1);
+
+      // 입력창과 전송 버튼이 다시 활성화됨
+      const restoredInput = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      expect(restoredInput).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /전송/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /중단/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 컴포넌트 언마운트 시 스트리밍이 진행 중일 때 When 언마운트되면 Then 스트림 cancel이 자동으로 호출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockCancel = vi.fn().mockResolvedValue(undefined);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return Object.assign(Promise.resolve(), { cancel: mockCancel });
+      });
+
+      let unmountFn: () => void = () => {};
+      await act(async () => {
+        const { unmount } = render(<AiService />);
+        unmountFn = unmount;
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '언마운트 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(mockCancel).not.toHaveBeenCalled();
+
+      await act(async () => {
+        unmountFn();
+      });
+
+      expect(mockCancel).toHaveBeenCalled();
+    });
+  });
 });
 

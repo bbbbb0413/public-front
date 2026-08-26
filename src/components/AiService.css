@@ -561,6 +561,31 @@
   cursor: not-allowed;
 }
 
+.chat-cancel-btn {
+  background: hsla(350, 80%, 50%, 0.85);
+  color: #ffffff;
+  border: 1px solid hsla(350, 80%, 60%, 0.5);
+  border-radius: 10px;
+  padding: 0 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-width: 76px;
+}
+
+.chat-cancel-btn:hover {
+  background: hsla(350, 85%, 55%, 1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsla(350, 80%, 50%, 0.3);
+}
+
+.chat-cancel-btn:focus-visible {
+  outline: 2px solid hsl(350, 90%, 65%);
+  outline-offset: 1px;
+}
+
 @keyframes blink {
   0%,
   100% {

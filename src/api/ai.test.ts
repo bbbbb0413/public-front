@@ -296,6 +296,7 @@ describe('AI Service API (Gateway 경유)', () => {
         Authorization: 'Bearer jwt-token',
         Accept: 'text/event-stream',
       },
+      signal: expect.any(AbortSignal),
     });
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -585,5 +586,65 @@ describe('AI Service API (Gateway 경유)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(onDone).toHaveBeenCalledWith(undefined);
+  });
+
+  it('askQuestionStream should return a cancel function that aborts fetch and calls DELETE /ai/jobs/:jobId', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-to-cancel' } });
+    mockAxios.delete.mockResolvedValueOnce({ data: { success: true } });
+
+    const stream = new ReadableStream({
+      start() {},
+    });
+
+    let abortSignal: AbortSignal | undefined;
+    const fetchSpy = vi.fn().mockImplementation((_url, options) => {
+      abortSignal = options?.signal;
+      return Promise.resolve({
+        ok: true,
+        body: stream,
+        headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    const handle = askQuestionStream('Question to cancel', onMessage, onDone, onError);
+
+    // wait until fetch has been initiated
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(handle).toBeDefined();
+    expect(typeof handle.cancel).toBe('function');
+
+    await handle.cancel!();
+
+    expect(abortSignal?.aborted).toBe(true);
+    expect(mockAxios.delete).toHaveBeenCalledWith('/ai/jobs/job-to-cancel');
+  });
+
+  it('askQuestionStream cancel before job resolution should abort without crashing', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    let resolveJob: (val: unknown) => void;
+    mockAxios.post.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveJob = resolve;
+      }),
+    );
+    mockAxios.delete.mockResolvedValueOnce({ data: { success: true } });
+
+    const handle = askQuestionStream('Early cancel', onMessage, onDone, onError);
+
+    const cancelPromise = handle.cancel!();
+    resolveJob!({ data: { jobId: 'job-late' } });
+    await cancelPromise;
+
+    expect(mockAxios.delete).toHaveBeenCalledWith('/ai/jobs/job-late');
   });
 });
