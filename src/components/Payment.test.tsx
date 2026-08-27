@@ -70,6 +70,7 @@ describe('Payment Component', () => {
       amount: 1000,
       currency: 'KRW',
       productId: 'gold_100',
+      idempotencyKey: expect.any(String),
     });
 
     // 영수증 확인

@@ -43,6 +43,7 @@ describe('payment API', () => {
       amount: 5000,
       currency: 'KRW',
       productId: 'gold_500',
+      idempotencyKey: expect.any(String),
     });
     expect(result.paymentId).toBe(101);
     expect(result.status).toBe('SUCCESS');
