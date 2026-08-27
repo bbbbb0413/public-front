@@ -2138,6 +2138,79 @@ describe('AiService Component', () => {
       expect(screen.getByText('선택한 문서를 삭제하시겠습니까?')).toBeInTheDocument();
       expect(screen.getByText(/삭제된 문서는 복구할 수 없으며/)).toBeInTheDocument();
     });
+    it('Given 백엔드 응답에 구체적인 에러 메시지가 없는 경우 When 삭제가 실패하면 Then 기본 메시지("문서 삭제에 실패했습니다.")가 표시된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.deleteDocument).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('문서 삭제에 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 삭제 진행 중(isDeleting: true)인 상태에서 When 사용자가 Escape 키를 누르거나 모달 배경을 클릭하면 Then 모달이 닫히지 않고 삭제 진행이 유지된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveDelete: (value: { success: boolean }) => void = () => {};
+      vi.mocked(aiApi.deleteDocument).mockImplementationOnce(() => {
+        return new Promise((resolve) => {
+          resolveDelete = resolve;
+        });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(confirmDeleteBtn).toBeDisabled();
+
+      // 삭제 진행 중 Escape 입력 시도
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      // 삭제 진행 중 오버레이 클릭 시도
+      const overlay = screen.getByTestId('delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      // 완료 처리
+      await act(async () => {
+        resolveDelete({ success: true });
+      });
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+    });
   });
 });
 
