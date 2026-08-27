@@ -22,8 +22,6 @@ import {
   activateUser,
   updateUserRole,
   deleteUser,
-  groqChat,
-  groqEmbedding,
 } from './admin';
 
 const mockAxios = axios as unknown as {
@@ -92,25 +90,5 @@ describe('admin API', () => {
     mockAxios.delete.mockResolvedValueOnce({ data: {} });
     await deleteUser(5);
     expect(mockAxios.delete).toHaveBeenCalledWith('/user/5');
-  });
-
-  it('groqChat returns assistant content', async () => {
-    mockAxios.post.mockResolvedValueOnce({
-      data: { data: { content: 'Hello from Groq' } },
-    });
-    const result = await groqChat([{ role: 'user', content: 'Hi' }]);
-    expect(mockAxios.post).toHaveBeenCalledWith('/chat/completion', {
-      messages: [{ role: 'user', content: 'Hi' }],
-    });
-    expect(result.content).toBe('Hello from Groq');
-  });
-
-  it('groqEmbedding returns embedding vector', async () => {
-    mockAxios.post.mockResolvedValueOnce({
-      data: { data: { embedding: [0.1, 0.2, 0.3] } },
-    });
-    const result = await groqEmbedding('test text');
-    expect(mockAxios.post).toHaveBeenCalledWith('/chat/embedding', { text: 'test text' });
-    expect(result.embedding).toEqual([0.1, 0.2, 0.3]);
   });
 });

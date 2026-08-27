@@ -83,22 +83,3 @@ export const deleteUser = async (id: number): Promise<void> => {
   await identityClient.delete(`/user/${id}`);
 };
 
-export interface GroqMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-export const groqChat = async (messages: GroqMessage[]): Promise<{ content: string }> => {
-  const res = await identityClient.post('/chat/completion', { messages });
-  return res.data?.data ?? res.data;
-};
-
-export const groqEmbedding = async (text: string): Promise<{ embedding: number[] }> => {
-  const res = await identityClient.post('/chat/embedding', { text });
-  return res.data?.data ?? res.data;
-};
-
-export const queueAdd = async (type: string, payload: Record<string, unknown>): Promise<{ jobId: string }> => {
-  const res = await identityClient.post('/queue/add', { type, payload });
-  return res.data?.data ?? res.data;
-};

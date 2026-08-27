@@ -4,18 +4,14 @@ import { AdminLogin } from './AdminLogin';
 import { UserManagement } from './UserManagement';
 import { PromptManagement } from './PromptManagement';
 import { LlmMonitor } from './LlmMonitor';
-import { GroqService } from './GroqService';
-import { QueuePanel } from './QueuePanel';
 import RagasEvalPanel from './RagasEvalPanel';
 
-type AdminTab = 'users' | 'prompts' | 'llm' | 'groq' | 'queue' | 'ragas';
+type AdminTab = 'users' | 'prompts' | 'llm' | 'ragas';
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'users', label: '유저 관리' },
   { id: 'prompts', label: '프롬프트 관리' },
   { id: 'llm', label: 'LLM 모니터링' },
-  { id: 'groq', label: 'Groq 서비스' },
-  { id: 'queue', label: '큐 패널' },
   { id: 'ragas', label: 'RAGAS 평가' },
 ];
 
@@ -63,8 +59,6 @@ export const AdminPanel = () => {
         {tab === 'users' && <UserManagement />}
         {tab === 'prompts' && <PromptManagement />}
         {tab === 'llm' && <LlmMonitor />}
-        {tab === 'groq' && <GroqService />}
-        {tab === 'queue' && <QueuePanel />}
         {tab === 'ragas' && <RagasEvalPanel />}
       </main>
     </div>
