@@ -3,9 +3,18 @@ import { AdminAuthContext } from '../../context/AdminAuthContext';
 
 type Mode = 'login' | 'signup';
 
+const extractErrorMessage = (err: unknown, fallback: string): string => {
+  const data = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data;
+  const message = data?.message;
+  if (Array.isArray(message)) return message.join(', ');
+  if (typeof message === 'string') return message;
+  return fallback;
+};
+
 export const AdminLogin = () => {
   const auth = useContext(AdminAuthContext);
   const [mode, setMode] = useState<Mode>('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,8 +27,8 @@ export const AdminLogin = () => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
-    if (!email.trim() || !password.trim()) {
-      setError('이메일과 비밀번호를 입력해주세요.');
+    if (!email.trim() || !password.trim() || (mode === 'signup' && !name.trim())) {
+      setError('모든 항목을 입력해주세요.');
       return;
     }
     setLoading(true);
@@ -27,13 +36,19 @@ export const AdminLogin = () => {
       if (mode === 'login') {
         await auth.login(email, password);
       } else {
-        await auth.signup(email, password);
+        await auth.signup(name, email, password);
         setSuccessMsg('회원가입 완료! 로그인해주세요.');
         setMode('login');
+        setName('');
         setPassword('');
       }
-    } catch {
-      setError(mode === 'login' ? '로그인에 실패했습니다.' : '회원가입에 실패했습니다.');
+    } catch (err) {
+      setError(
+        extractErrorMessage(
+          err,
+          mode === 'login' ? '로그인에 실패했습니다.' : '회원가입에 실패했습니다.',
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -50,6 +65,19 @@ export const AdminLogin = () => {
         </p>
 
         <form onSubmit={handleSubmit}>
+          {mode === 'signup' && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>NAME</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="관리자 이름"
+                disabled={loading}
+                style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f1f5f9', fontSize: 14, boxSizing: 'border-box' }}
+              />
+            </div>
+          )}
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 6 }}>EMAIL</label>
             <input

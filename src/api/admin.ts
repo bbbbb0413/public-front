@@ -40,8 +40,12 @@ export interface PageMeta {
   hasNextPage: boolean;
 }
 
-export const adminSignup = async (email: string, password: string): Promise<AdminUser> => {
-  const res = await identityClient.post('/admin/auth/signup', { email, password });
+export const adminSignup = async (
+  name: string,
+  email: string,
+  password: string,
+): Promise<AdminUser> => {
+  const res = await identityClient.post('/admin/auth/signup', { name, email, password });
   return res.data?.data;
 };
 

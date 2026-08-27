@@ -5,7 +5,7 @@ interface AdminAuthContextType {
   admin: AdminUser | null;
   isAdminAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -38,8 +38,8 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
     setAdmin(userPart);
   };
 
-  const signup = async (email: string, password: string) => {
-    await apiAdminSignup(email, password);
+  const signup = async (name: string, email: string, password: string) => {
+    await apiAdminSignup(name, email, password);
   };
 
   const logout = () => {
