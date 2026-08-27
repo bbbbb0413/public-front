@@ -944,3 +944,92 @@
     display: none;
   }
 }
+
+/* ── 문서 삭제 확인 모달 (SPEC-013) ── */
+.delete-confirm-modal {
+  width: min(440px, 90vw);
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 25px 50px -12px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: modalSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.delete-confirm-title {
+  margin: 0 0 12px 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.delete-confirm-message {
+  margin: 0 0 8px 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #e2e8f0;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.delete-confirm-warning {
+  margin: 0 0 20px 0;
+  font-size: 0.85rem;
+  color: #f87171;
+  line-height: 1.4;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-cancel-delete {
+  padding: 8px 16px;
+  background: #334155;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel-delete:hover:not(:disabled) {
+  background: #475569;
+  color: #ffffff;
+}
+
+.btn-cancel-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-confirm-delete {
+  padding: 8px 18px;
+  background: #dc2626;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-confirm-delete:hover:not(:disabled) {
+  background: #b91c1c;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.4);
+}
+
+.btn-confirm-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

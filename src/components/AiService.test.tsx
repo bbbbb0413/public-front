@@ -58,7 +58,7 @@ describe('AiService Component', () => {
     expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
   });
 
-  it('deletes a document and refreshes list', async () => {
+  it('deletes a document and refreshes list after confirmation', async () => {
     const mockDocs = [
       { id: 'doc-1', fileName: 'delete-me.txt', status: 'processed', chunkCount: 1, createdAt: '2026-06-18T05:00:00Z' },
     ];
@@ -72,6 +72,17 @@ describe('AiService Component', () => {
     const deleteBtn = screen.getByRole('button', { name: /삭제/i });
     await act(async () => {
       fireEvent.click(deleteBtn);
+    });
+
+    // 모달 열림 확인 및 즉시 API 호출되지 않음 확인
+    const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+    expect(modal).toBeInTheDocument();
+    expect(aiApi.deleteDocument).not.toHaveBeenCalled();
+
+    // 모달 내부의 삭제 확인 버튼 클릭
+    const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(confirmDeleteBtn);
     });
 
     expect(aiApi.deleteDocument).toHaveBeenCalledWith('doc-1');
@@ -1932,6 +1943,273 @@ describe('AiService Component', () => {
       expect(screen.getByRole('button', { name: /전송/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /중단/i })).not.toBeInTheDocument();
       expect(mockCancel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Document Delete Confirmation Modal (SPEC-013)', () => {
+    it('Given 사용자가 문서 목록에서 특정 문서(handbook.pdf)의 삭제 버튼을 클릭했을 때 When 삭제 버튼이 눌리면 Then API 호출이 즉시 발생하지 않고 handbook.pdf 파일명이 명시된 삭제 확인 모달이 화면에 표시된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const deleteBtn = screen.getByRole('button', { name: /삭제/i });
+      await act(async () => {
+        fireEvent.click(deleteBtn);
+      });
+
+      // API가 즉시 호출되지 않음
+      expect(aiApi.deleteDocument).not.toHaveBeenCalled();
+
+      // 모달 표시 및 파일명 노출 확인
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText(/"handbook\.pdf" 문서를 삭제하시겠습니까\?/)).toBeInTheDocument();
+      expect(screen.getByText(/삭제된 문서는 복구할 수 없으며/)).toBeInTheDocument();
+    });
+
+    it('Given 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 취소 버튼을 클릭하면 Then 삭제 API가 호출되지 않고 확인 모달이 즉시 닫힌다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      const cancelBtn = screen.getByRole('button', { name: /취소/i });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(aiApi.deleteDocument).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 Escape 키를 누르면 Then 삭제 API가 호출되지 않고 확인 모달이 즉시 닫힌다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+      });
+
+      expect(aiApi.deleteDocument).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 모달 배경 오버레이를 클릭하면 Then 모달이 닫힌다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const overlay = screen.getByTestId('delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(aiApi.deleteDocument).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 모달의 삭제 버튼을 클릭하면 Then 백엔드 삭제 API가 호출되고, 요청 중에는 모달 버튼이 "삭제 중..." 으로 표시되며 비활성화된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveDelete: (value: { success: boolean }) => void = () => {};
+      vi.mocked(aiApi.deleteDocument).mockImplementationOnce(() => {
+        return new Promise((resolve) => {
+          resolveDelete = resolve;
+        });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      const cancelBtn = modal.querySelector('.btn-cancel-delete') as HTMLButtonElement;
+
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(aiApi.deleteDocument).toHaveBeenCalledWith('doc-101');
+      expect(confirmDeleteBtn.textContent).toBe('삭제 중...');
+      expect(confirmDeleteBtn).toBeDisabled();
+      expect(cancelBtn).toBeDisabled();
+
+      // 삭제 성공 완료 시뮬레이션
+      await act(async () => {
+        resolveDelete({ success: true });
+      });
+
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(2); // 최초 1회 + 삭제 완료 후 1회
+    });
+
+    it('Given 백엔드 장애나 네트워크 오류로 삭제 요청이 실패했을 때 When API 호출이 에러를 반환하면 Then 확인 모달이 닫히고 상단 에러 배너에 서버 에러 메시지 또는 "문서 삭제에 실패했습니다." 가 표시된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      const errorResponse = {
+        response: {
+          data: {
+            message: '서버 내부 오류로 문서를 삭제할 수 없습니다.',
+          },
+        },
+      };
+      vi.mocked(aiApi.deleteDocument).mockRejectedValueOnce(errorResponse);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('서버 내부 오류로 문서를 삭제할 수 없습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 파일명이 빈 문자열이거나 유효하지 않은 문서 항목의 삭제 버튼을 클릭했을 때 (경계 케이스) When 확인 모달이 열리면 Then 기본 텍스트("선택한 문서를 삭제하시겠습니까?")로 안전하게 렌더링된다', async () => {
+      const mockDocs = [
+        { id: 'doc-empty-name', fileName: '', status: 'processed', chunkCount: 1, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+      expect(screen.getByText('선택한 문서를 삭제하시겠습니까?')).toBeInTheDocument();
+      expect(screen.getByText(/삭제된 문서는 복구할 수 없으며/)).toBeInTheDocument();
+    });
+    it('Given 백엔드 응답에 구체적인 에러 메시지가 없는 경우 When 삭제가 실패하면 Then 기본 메시지("문서 삭제에 실패했습니다.")가 표시된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.deleteDocument).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('문서 삭제에 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 삭제 진행 중(isDeleting: true)인 상태에서 When 사용자가 Escape 키를 누르거나 모달 배경을 클릭하면 Then 모달이 닫히지 않고 삭제 진행이 유지된다', async () => {
+      const mockDocs = [
+        { id: 'doc-101', fileName: 'handbook.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-06-18T05:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveDelete: (value: { success: boolean }) => void = () => {};
+      vi.mocked(aiApi.deleteDocument).mockImplementationOnce(() => {
+        return new Promise((resolve) => {
+          resolveDelete = resolve;
+        });
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /삭제/i }));
+      });
+
+      const modal = screen.getByRole('dialog', { name: /문서 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(confirmDeleteBtn).toBeDisabled();
+
+      // 삭제 진행 중 Escape 입력 시도
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      // 삭제 진행 중 오버레이 클릭 시도
+      const overlay = screen.getByTestId('delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.getByRole('dialog', { name: /문서 삭제 확인/i })).toBeInTheDocument();
+
+      // 완료 처리
+      await act(async () => {
+        resolveDelete({ success: true });
+      });
+      expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
     });
   });
 });
