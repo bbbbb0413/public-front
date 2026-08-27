@@ -1,7 +1,8 @@
 import axios from 'axios';
 
+// admin API는 gateway를 거쳐 admin-server(gRPC)로 프록시된다.
 const identityClient = axios.create({
-  baseURL: import.meta.env.VITE_IDENTITY_API_BASE_URL || 'http://localhost:3001',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -40,7 +41,7 @@ export interface PageMeta {
 }
 
 export const adminSignup = async (email: string, password: string): Promise<AdminUser> => {
-  const res = await identityClient.post('/auth/signup', { email, password });
+  const res = await identityClient.post('/admin/auth/signup', { email, password });
   return res.data?.data;
 };
 
@@ -48,7 +49,7 @@ export const adminLogin = async (
   email: string,
   password: string,
 ): Promise<{ token: string; user: AdminUser }> => {
-  const res = await identityClient.post('/auth/login', { email, password });
+  const res = await identityClient.post('/admin/auth/login', { email, password });
   return res.data?.data;
 };
 
@@ -56,30 +57,30 @@ export const getUsers = async (
   page = 1,
   take = 10,
 ): Promise<{ data: AdminUser[]; meta: PageMeta }> => {
-  const res = await identityClient.get('/user', { params: { page, take } });
+  const res = await identityClient.get('/admin/user', { params: { page, take } });
   return { data: res.data?.data ?? [], meta: res.data?.meta };
 };
 
 export const getUserById = async (id: number): Promise<AdminUser> => {
-  const res = await identityClient.get(`/user/${id}`);
+  const res = await identityClient.get(`/admin/user/${id}`);
   return res.data?.data;
 };
 
 export const activateUser = async (userId: number, activate: boolean): Promise<AdminUser> => {
-  const res = await identityClient.put('/user/activate', { userId, activate });
+  const res = await identityClient.put('/admin/user/activate', { userId, activate });
   return res.data?.data;
 };
 
 export const updateUserRole = async (userId: number, role: string): Promise<AdminUser> => {
-  const res = await identityClient.put('/user/role', { userId, role });
+  const res = await identityClient.put('/admin/user/role', { userId, role });
   return res.data?.data;
 };
 
 export const changePassword = async (email: string, password: string): Promise<void> => {
-  await identityClient.post('/user/change/password', { email, password });
+  await identityClient.post('/admin/user/change/password', { email, password });
 };
 
 export const deleteUser = async (id: number): Promise<void> => {
-  await identityClient.delete(`/user/${id}`);
+  await identityClient.delete(`/admin/user/${id}`);
 };
 
