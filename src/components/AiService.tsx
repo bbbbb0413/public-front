@@ -75,6 +75,9 @@ export const AiService = () => {
   const [promptError, setPromptError] = useState('');
   const [promptSuccessMsg, setPromptSuccessMsg] = useState('');
 
+  const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const handleCopyAnswer = async (text: string, index: number) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -211,6 +214,17 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isChatOpen]);
 
+  useEffect(() => {
+    if (!deletingDoc) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDeleting) {
+        setDeletingDoc(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deletingDoc, isDeleting]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -288,13 +302,29 @@ export const AiService = () => {
     }
   };
 
-  const handleDeleteDocument = async (id: string) => {
-    setErrorMsg('');
+  const handleDeleteClick = (doc: DocumentInfo) => {
+    setDeletingDoc({ id: doc.id, fileName: doc.fileName });
+  };
+
+  const handleCancelDelete = () => {
+    if (isDeleting) return;
+    setDeletingDoc(null);
+  };
+
+  const confirmDeleteDocument = async () => {
+    if (!deletingDoc || isDeleting) return;
+    setIsDeleting(true);
     try {
-      await deleteDocument(id);
+      await deleteDocument(deletingDoc.id);
+      setDeletingDoc(null);
       await fetchDocuments();
-    } catch {
-      setErrorMsg('문서 삭제에 실패했습니다.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: unknown } } };
+      const serverMessage = err.response?.data?.message;
+      setErrorMsg(typeof serverMessage === 'string' ? serverMessage : '문서 삭제에 실패했습니다.');
+      setDeletingDoc(null);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -494,7 +524,7 @@ export const AiService = () => {
                       </td>
                       <td>{doc.chunkCount}</td>
                       <td>
-                        <button onClick={() => handleDeleteDocument(doc.id)} className="btn-delete">
+                        <button onClick={() => handleDeleteClick(doc)} className="btn-delete">
                           삭제
                         </button>
                       </td>
@@ -877,7 +907,57 @@ export const AiService = () => {
           </div>
         </div>
       )}
+
+      {/* 문서 삭제 확인 모달 */}
+      {deletingDoc && (
+        <div
+          className="chat-modal-overlay"
+          data-testid="delete-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCancelDelete();
+          }}
+          role="presentation"
+        >
+          <div
+            className="delete-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+          >
+            <h3 id="delete-confirm-title" className="delete-confirm-title">
+              문서 삭제 확인
+            </h3>
+            <p className="delete-confirm-message">
+              {deletingDoc.fileName
+                ? `"${deletingDoc.fileName}" 문서를 삭제하시겠습니까?`
+                : '선택한 문서를 삭제하시겠습니까?'}
+            </p>
+            <p className="delete-confirm-warning">
+              삭제된 문서는 복구할 수 없으며 지식베이스에서 영구히 제거됩니다.
+            </p>
+            <div className="delete-confirm-actions">
+              <button
+                type="button"
+                className="btn-cancel-delete"
+                onClick={handleCancelDelete}
+                disabled={isDeleting}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn-confirm-delete"
+                onClick={confirmDeleteDocument}
+                disabled={isDeleting}
+              >
+                {isDeleting ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 export default AiService;
+
