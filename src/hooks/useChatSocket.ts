@@ -2,9 +2,17 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { buildSendMessageRequest, decodeMessageBatch, DecodedMessage } from '../flatbuffers/chatUtils';
 
+interface HistoryMessage {
+  messageId: string;
+  senderUuid: string;
+  content: string;
+  createdAt: number;
+}
+
 interface SocketAck {
   success: boolean;
   error?: string;
+  messages?: HistoryMessage[];
 }
 
 interface UseChatSocketProps {
@@ -39,6 +47,19 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
       socket.emit('join_room', { roomId }, (response: SocketAck) => {
         if (response && !response.success) {
           setError(response.error || '방 입장에 실패했습니다.');
+          return;
+        }
+        if (response?.messages) {
+          const history: DecodedMessage[] = response.messages.map((m) => ({
+            id: m.messageId,
+            status: 0,
+            senderId: m.senderUuid,
+            content: m.content,
+            metadata: '',
+            timestamp: m.createdAt,
+            eventTimestamp: m.createdAt * 1000,
+          }));
+          setMessages(history);
         }
       });
     });
