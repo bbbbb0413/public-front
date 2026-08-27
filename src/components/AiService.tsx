@@ -8,10 +8,14 @@ import {
   getSessions,
   deleteSessionById,
   subscribeIngestJob,
+  getMyPrompt,
+  saveMyPrompt,
+  resetMyPrompt,
   SourceRef,
   SessionOut,
   AgentProgress,
   AgentPhase,
+  MyPromptOut,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import './AiService.css';
@@ -62,6 +66,14 @@ export const AiService = () => {
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
+  const [myPrompt, setMyPrompt] = useState<MyPromptOut | null>(null);
+  const [promptDraft, setPromptDraft] = useState('');
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptError, setPromptError] = useState('');
+  const [promptSuccessMsg, setPromptSuccessMsg] = useState('');
 
   const handleCopyAnswer = async (text: string, index: number) => {
     try {
@@ -286,6 +298,60 @@ export const AiService = () => {
     }
   };
 
+  const handleOpenPromptSettings = async () => {
+    setIsPromptSettingsOpen(true);
+    setPromptLoading(true);
+    setPromptError('');
+    setPromptSuccessMsg('');
+    try {
+      const prompt = await getMyPrompt();
+      setMyPrompt(prompt);
+      setPromptDraft(prompt.content);
+    } catch {
+      setPromptError('프롬프트를 불러오지 못했습니다.');
+    } finally {
+      setPromptLoading(false);
+    }
+  };
+
+  const handleSavePrompt = async () => {
+    if (!promptDraft.trim()) {
+      setPromptError('프롬프트 내용을 입력해주세요.');
+      return;
+    }
+    setPromptSaving(true);
+    setPromptError('');
+    setPromptSuccessMsg('');
+    try {
+      const saved = await saveMyPrompt(promptDraft);
+      setMyPrompt(saved);
+      setPromptSuccessMsg('내 시스템 프롬프트가 저장되어 즉시 적용되었습니다.');
+    } catch {
+      setPromptError('프롬프트 저장에 실패했습니다.');
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
+  const handleResetPrompt = async () => {
+    setPromptSaving(true);
+    setPromptError('');
+    setPromptSuccessMsg('');
+    try {
+      await resetMyPrompt();
+      const prompt = await getMyPrompt();
+      setMyPrompt(prompt);
+      setPromptDraft(prompt.content);
+      setPromptSuccessMsg('기본 프롬프트로 초기화되었습니다.');
+    } catch {
+      setPromptError('초기화에 실패했습니다.');
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
+  const isMyCustomPrompt = !!(myPrompt && userId && myPrompt.userId === userId);
+
   const handleCancelStreaming = async () => {
     if (activeStreamCancelRef.current) {
       await activeStreamCancelRef.current();
@@ -444,9 +510,19 @@ export const AiService = () => {
         <div className="qa-section glass-panel">
           <div className="qa-section-header">
             <h4>문서 기반 AI Q&A</h4>
-            <button onClick={() => setIsChatOpen(true)} className="btn-open-chat">
-              채팅 열기 ↗
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={handleOpenPromptSettings}
+                className="btn-open-chat"
+                style={{ background: 'rgba(255,255,255,0.08)', boxShadow: 'none' }}
+                title="AI 답변 시스템 프롬프트를 내 취향에 맞게 바꿀 수 있습니다"
+              >
+                AI 설정 ⚙
+              </button>
+              <button onClick={() => setIsChatOpen(true)} className="btn-open-chat">
+                채팅 열기 ↗
+              </button>
+            </div>
           </div>
 
           <div className="qa-preview">
@@ -700,6 +776,104 @@ export const AiService = () => {
                 )}
               </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 내 시스템 프롬프트 설정 모달 */}
+      {isPromptSettingsOpen && (
+        <div
+          className="chat-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsPromptSettingsOpen(false);
+          }}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prompt-settings-title"
+            style={{
+              background: '#1e293b',
+              borderRadius: 12,
+              padding: 28,
+              width: 560,
+              maxWidth: '90vw',
+              border: '1px solid #334155',
+            }}
+          >
+            <h3 id="prompt-settings-title" style={{ color: '#f1f5f9', marginBottom: 4, fontSize: 18, fontWeight: 700 }}>
+              AI 답변 스타일 설정
+            </h3>
+            <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16 }}>
+              AI가 답변할 때 따르는 시스템 프롬프트를 내 취향에 맞게 바꿀 수 있습니다. 저장하면 내 질문에만 적용되고, 다른 사용자에게는 영향을 주지 않습니다.
+            </p>
+
+            {promptError && (
+              <div style={{ background: '#450a0a', border: '1px solid #991b1b', borderRadius: 6, padding: '10px 12px', color: '#fca5a5', fontSize: 13, marginBottom: 12 }}>
+                {promptError}
+              </div>
+            )}
+            {promptSuccessMsg && (
+              <div style={{ background: '#052e16', border: '1px solid #166534', borderRadius: 6, padding: '10px 12px', color: '#86efac', fontSize: 13, marginBottom: 12 }}>
+                {promptSuccessMsg}
+              </div>
+            )}
+
+            {promptLoading ? (
+              <div style={{ color: '#94a3b8', fontSize: 13, padding: '24px 0', textAlign: 'center' }}>
+                불러오는 중...
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 8 }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      fontSize: 11,
+                      background: isMyCustomPrompt ? '#052e16' : '#1e3a5f',
+                      color: isMyCustomPrompt ? '#86efac' : '#93c5fd',
+                    }}
+                  >
+                    {isMyCustomPrompt ? '내 커스텀 설정 사용 중' : '기본값 사용 중'}
+                  </span>
+                </div>
+                <textarea
+                  value={promptDraft}
+                  onChange={(e) => setPromptDraft(e.target.value)}
+                  rows={12}
+                  disabled={promptSaving}
+                  style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.6, marginBottom: 16 }}
+                />
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setIsPromptSettingsOpen(false)}
+                    disabled={promptSaving}
+                    style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 13 }}
+                  >
+                    닫기
+                  </button>
+                  {isMyCustomPrompt && (
+                    <button
+                      onClick={handleResetPrompt}
+                      disabled={promptSaving}
+                      style={{ padding: '8px 16px', background: '#450a0a', border: 'none', borderRadius: 6, color: '#fca5a5', cursor: 'pointer', fontSize: 13 }}
+                    >
+                      기본값으로 초기화
+                    </button>
+                  )}
+                  <button
+                    onClick={handleSavePrompt}
+                    disabled={promptSaving}
+                    style={{ padding: '8px 16px', background: promptSaving ? '#334155' : '#6366f1', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 13 }}
+                  >
+                    {promptSaving ? '저장 중...' : '저장 및 적용'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

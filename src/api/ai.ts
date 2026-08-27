@@ -123,6 +123,30 @@ export const deleteDocument = async (id: string) => {
   return response.data;
 };
 
+export interface MyPromptOut {
+  id: string | null;
+  name: string;
+  version: number;
+  content: string;
+  isActive: boolean;
+  userId?: string | null;
+  createdAt: string;
+}
+
+export const getMyPrompt = async (): Promise<MyPromptOut> => {
+  const response = await client.get('/ai/my-prompt');
+  return response.data;
+};
+
+export const saveMyPrompt = async (content: string): Promise<MyPromptOut> => {
+  const response = await client.post('/ai/my-prompt', { content });
+  return response.data;
+};
+
+export const resetMyPrompt = async (): Promise<void> => {
+  await client.delete('/ai/my-prompt');
+};
+
 export interface SourceRef {
   fileName: string;
   chunkIndex: number;
