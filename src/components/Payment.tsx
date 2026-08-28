@@ -6,6 +6,8 @@ import {
   getPayment,
   PaymentReply,
 } from '../api/payment';
+import { PaymentHistory } from './PaymentHistory';
+import { TERMINAL_STATUSES, statusClassName } from '../utils/payment-status';
 import './Payment.css';
 
 interface Product {
@@ -40,17 +42,10 @@ const PRODUCTS: Product[] = [
   },
 ];
 
-const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED']);
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 10;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-const statusClassName = (status: string): string => {
-  if (status === 'COMPLETED') return 'status-success';
-  if (status === 'FAILED') return 'status-failed';
-  return 'status-pending';
-};
 
 const receiptTitleClassName = (status: string): string => {
   if (status === 'COMPLETED') return 'receipt-title receipt-title--success';
@@ -85,15 +80,12 @@ const purchaseErrorMessage = (error: unknown): string => {
   }
 };
 
-export const Payment = () => {
+type PaymentTab = 'shop' | 'history';
+
+const Shop = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<PaymentReply | null>(null);
-
-  const [queryId, setQueryId] = useState('');
-  const [queryResult, setQueryResult] = useState<PaymentReply | null>(null);
-  const [queryLoading, setQueryLoading] = useState(false);
-  const [queryError, setQueryError] = useState('');
 
   // 응답을 받지 못한(네트워크 오류 등) 시도에 한해 같은 멱등키를 재사용하기 위한 참조.
   // 서버 응답을 확정적으로 받으면(성공/실패 무관) 다음 구매는 새 시도로 간주해 초기화한다.
@@ -116,25 +108,6 @@ export const Payment = () => {
       }
     }
     return null;
-  };
-
-  const handleQuery = async () => {
-    const id = parseInt(queryId, 10);
-    if (!queryId.trim() || isNaN(id)) {
-      setQueryError('유효한 결제 ID를 입력하세요.');
-      return;
-    }
-    setQueryLoading(true);
-    setQueryError('');
-    setQueryResult(null);
-    try {
-      const result = await getPayment(id);
-      setQueryResult(result);
-    } catch {
-      setQueryError('해당 결제 정보를 찾을 수 없습니다.');
-    } finally {
-      setQueryLoading(false);
-    }
   };
 
   const handlePurchase = async (product: Product) => {
@@ -160,7 +133,7 @@ export const Payment = () => {
           if (final) {
             setReceipt(final);
           } else {
-            setError('결제 확인이 지연되고 있습니다. 결제 조회에서 최종 상태를 확인해 주세요.');
+            setError('결제 확인이 지연되고 있습니다. 결제 내역에서 최종 상태를 확인해 주세요.');
           }
         }
       }
@@ -173,10 +146,7 @@ export const Payment = () => {
   };
 
   return (
-    <div className="payment-wrapper">
-      <h2 className="payment-main-title">Premium Shop</h2>
-      <p className="payment-main-subtitle">아이템을 구매하여 게임 플레이를 강화해 보세요.</p>
-
+    <>
       {error && <div className="payment-error-toast">{error}</div>}
 
       <div className="products-grid">
@@ -235,51 +205,39 @@ export const Payment = () => {
           </div>
         </div>
       )}
+    </>
+  );
+};
 
-      <div className="payment-query-section">
-        <h3 className="payment-query-title">결제 조회</h3>
-        <div className="payment-query-row">
-          <input
-            type="number"
-            value={queryId}
-            onChange={(e) => setQueryId(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleQuery()}
-            placeholder="결제 ID 입력"
-            className="payment-query-input"
-          />
-          <button
-            onClick={handleQuery}
-            disabled={queryLoading}
-            className="payment-query-btn"
-          >
-            {queryLoading ? '조회 중...' : '조회'}
-          </button>
-        </div>
-        {queryError && <p className="payment-query-error">{queryError}</p>}
-        {queryResult && (
-          <div className="payment-query-result glass-panel">
-            <div className="receipt-row">
-              <span>결제 ID</span>
-              <strong>{queryResult.paymentId}</strong>
-            </div>
-            <div className="receipt-row">
-              <span>계정 ID</span>
-              <strong>{queryResult.accountId}</strong>
-            </div>
-            <div className="receipt-row">
-              <span>상품 코드</span>
-              <strong>{queryResult.productId}</strong>
-            </div>
-            <div className="receipt-row">
-              <span>결제 금액</span>
-              <strong>{queryResult.amount.toLocaleString()} {queryResult.currency}</strong>
-            </div>
-            <div className="receipt-row">
-              <span>결제 상태</span>
-              <span className={statusClassName(queryResult.status)}>{queryResult.status}</span>
-            </div>
-          </div>
-        )}
+export const Payment = () => {
+  const [tab, setTab] = useState<PaymentTab>('shop');
+
+  return (
+    <div className="payment-wrapper">
+      <h2 className="payment-main-title">{tab === 'shop' ? 'Premium Shop' : '결제 내역'}</h2>
+      <p className="payment-main-subtitle">
+        {tab === 'shop'
+          ? '아이템을 구매하여 게임 플레이를 강화해 보세요.'
+          : '내가 결제한 내역을 확인할 수 있습니다.'}
+      </p>
+
+      <div className="payment-tabs">
+        <button
+          onClick={() => setTab('shop')}
+          className={`payment-tab-button ${tab === 'shop' ? 'active' : ''}`}
+        >
+          구매
+        </button>
+        <button
+          onClick={() => setTab('history')}
+          className={`payment-tab-button ${tab === 'history' ? 'active' : ''}`}
+        >
+          결제 내역
+        </button>
+      </div>
+
+      <div className="payment-tab-content">
+        {tab === 'shop' ? <Shop /> : <PaymentHistory />}
       </div>
     </div>
   );

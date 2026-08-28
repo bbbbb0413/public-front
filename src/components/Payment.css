@@ -19,7 +19,39 @@
 .payment-main-subtitle {
   color: var(--text-secondary);
   font-size: 0.9375rem;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
+}
+
+.payment-tabs {
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-glass);
+  padding-bottom: 15px;
+  margin-bottom: 24px;
+}
+
+.payment-tab-button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.payment-tab-button.active {
+  background: var(--bg-secondary);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.1);
+}
+
+.payment-tab-button:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
 }
 
 .products-grid {
@@ -208,63 +240,26 @@
   background: var(--color-accent-hover);
 }
 
-/* 결제 조회 */
-.payment-query-section {
-  margin-top: 48px;
+/* 결제 내역 */
+.payment-history-status {
   text-align: left;
-  border-top: 1px solid var(--border-glass);
-  padding-top: 32px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
 }
 
-.payment-query-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 16px;
+.payment-history-status--error {
+  color: var(--color-danger);
 }
 
-.payment-query-row {
+.payment-history-list {
   display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.payment-query-input {
-  flex: 1;
-  padding: 10px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-glass);
-  border-radius: 8px;
-  color: var(--text-primary);
-  font-size: 0.875rem;
-}
-
-.payment-query-btn {
-  padding: 10px 20px;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 8px;
-  color: white;
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.payment-query-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.payment-query-error {
-  color: #f87171;
-  font-size: 0.8125rem;
-  margin-bottom: 12px;
-}
-
-.payment-query-result {
+.payment-history-row {
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 8px;
 }

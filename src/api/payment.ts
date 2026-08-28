@@ -9,6 +9,16 @@ export interface PaymentReply {
   status: string;
 }
 
+export interface PaymentListReply {
+  payments: PaymentReply[];
+  page: number;
+  take: number;
+  itemCount: number;
+  pageCount: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+}
+
 export type PaymentErrorKind = 'validation' | 'conflict' | 'server';
 
 interface HttpErrorLike {
@@ -44,5 +54,10 @@ export const createPayment = async (
 
 export const getPayment = async (paymentId: number): Promise<PaymentReply> => {
   const response = await client.get(`/payments/${paymentId}`);
+  return response.data?.data;
+};
+
+export const listPayments = async (page = 1, take = 20): Promise<PaymentListReply> => {
+  const response = await client.get('/payments', { params: { page, take } });
   return response.data?.data;
 };

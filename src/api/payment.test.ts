@@ -13,7 +13,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-import { classifyPaymentError, createPayment, getPayment } from './payment';
+import { classifyPaymentError, createPayment, getPayment, listPayments } from './payment';
 
 const mockAxios = axios as unknown as {
   post: ReturnType<typeof vi.fn>;
@@ -88,6 +88,28 @@ describe('payment API', () => {
     expect(mockAxios.get).toHaveBeenCalledWith('/payments/101');
     expect(result.paymentId).toBe(101);
     expect(result.productId).toBe('gold_500');
+  });
+
+  it('listPayments fetches the current page of payments with default paging', async () => {
+    mockAxios.get.mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: [
+            { paymentId: 101, accountId: 42, amount: 5000, currency: 'KRW', productId: 'gold_500', status: 'COMPLETED' },
+          ],
+          page: 1,
+          take: 20,
+          itemCount: 1,
+          pageCount: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+        },
+      },
+    });
+    const result = await listPayments();
+    expect(mockAxios.get).toHaveBeenCalledWith('/payments', { params: { page: 1, take: 20 } });
+    expect(result.payments).toHaveLength(1);
+    expect(result.payments[0].paymentId).toBe(101);
   });
 });
 

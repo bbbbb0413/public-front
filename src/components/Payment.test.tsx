@@ -187,4 +187,39 @@ describe('Payment Component', () => {
     expect(axios.get).toHaveBeenCalledWith('/payments/555');
     expect(screen.getByText('결제가 완료되었습니다!')).toBeInTheDocument();
   });
+
+  it('switches to the 결제 내역 tab and fetches the payment list, hiding the shop grid', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: [
+            {
+              paymentId: 321,
+              accountId: 101,
+              amount: 4500,
+              currency: 'KRW',
+              productId: 'gold_500',
+              status: 'COMPLETED',
+            },
+          ],
+          page: 1,
+          take: 20,
+          itemCount: 1,
+          pageCount: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+        },
+      },
+    });
+
+    renderPayment();
+
+    await act(async () => {
+      screen.getByRole('button', { name: '결제 내역' }).click();
+    });
+
+    expect(axios.get).toHaveBeenCalledWith('/payments', { params: { page: 1, take: 20 } });
+    expect(screen.queryByText('100 Gold Coins')).not.toBeInTheDocument();
+    expect(screen.getByText('321')).toBeInTheDocument();
+  });
 });
