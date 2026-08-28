@@ -723,7 +723,7 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getByText(longSnippet)).toBeInTheDocument();
-      expect(screen.getByTestId('source-snippet-0').textContent?.length).toBe(303);
+      expect(screen.getByTestId('source-snippet-d-long-0').textContent?.length).toBe(303);
     });
 
     it('Given 조각 본문에 010-1234-5678 이 포함된 경우 When 출처를 펼치면 Then 그 번호가 마스킹된 상태로 보인다', async () => {
@@ -831,7 +831,7 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getByText('legacy.pdf')).toBeInTheDocument();
-      expect(screen.getByText('청크 0')).toBeInTheDocument();
+      expect(screen.getByText('근거 1건')).toBeInTheDocument();
     });
 
     it('Given 출처 항목에 키보드 포커스가 있을 때 When Enter를 누르면 Then 마우스로 누른 것과 같이 펼쳐진다', async () => {
@@ -935,14 +935,79 @@ describe('AiService Component', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
 
-      expect(screen.getByText('관련도 90%')).toBeInTheDocument();
-      expect(screen.getByText('관련도 50%')).toBeInTheDocument();
-      expect(screen.getByText('관련도 20%')).toBeInTheDocument();
+      expect(screen.getByText('최고 관련도 90%')).toBeInTheDocument();
+      expect(screen.getByText('최고 관련도 50%')).toBeInTheDocument();
+      expect(screen.getByText('최고 관련도 20%')).toBeInTheDocument();
 
       const names = screen
         .getAllByText(/\.pdf$/)
         .map((el) => el.textContent);
       expect(names).toEqual(['high.pdf', 'mid.pdf', 'low.pdf']);
+    });
+
+    it('Given 같은 문서에서 여러 청크가 근거로 나온 경우 When 답변이 도착하면 Then 문서명이 반복되지 않고 하나의 그룹으로 묶여 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'same.pdf', chunkIndex: 3, documentId: 'd-same', score: 0.84, snippet: '청크 3 내용' },
+        { fileName: 'same.pdf', chunkIndex: 27, documentId: 'd-same', score: 0.83, snippet: '청크 27 내용' },
+        { fileName: 'same.pdf', chunkIndex: 25, documentId: 'd-same', score: 0.81, snippet: '청크 25 내용' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('그룹핑 테스트 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '그룹핑 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 문서명은 그룹 헤더 1개에만 나타난다 — 청크 개수만큼 반복되지 않는다
+      expect(screen.getAllByText('same.pdf')).toHaveLength(1);
+      expect(screen.getByText('근거 3건')).toBeInTheDocument();
+      expect(screen.getByText('최고 관련도 84%')).toBeInTheDocument();
+      // "원문 보기"도 그룹당 1개만 존재한다
+      expect(screen.getAllByRole('button', { name: '원문 보기' })).toHaveLength(1);
+
+      // 펼치기 전에는 개별 청크 스니펫이 보이지 않는다
+      expect(screen.queryByText('청크 3 내용')).not.toBeInTheDocument();
+
+      const groupHeader = screen.getByRole('button', { name: /same\.pdf/i });
+      await act(async () => {
+        fireEvent.click(groupHeader);
+      });
+
+      // 펼치면 청크별 관련도와 스니펫이 모두 나타난다
+      expect(screen.getByText('청크 3 내용')).toBeInTheDocument();
+      expect(screen.getByText('청크 27 내용')).toBeInTheDocument();
+      expect(screen.getByText('청크 25 내용')).toBeInTheDocument();
+      expect(screen.getByText('관련도 84%')).toBeInTheDocument();
+      expect(screen.getByText('관련도 83%')).toBeInTheDocument();
+      expect(screen.getByText('관련도 81%')).toBeInTheDocument();
     });
 
     it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 클릭 시점에 빈 탭을 먼저 열고 파일을 받아온 뒤 그 탭을 원본으로 이동시킨다', async () => {

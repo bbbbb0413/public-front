@@ -64,7 +64,7 @@ export const AiService = () => {
   const [sessions, setSessions] = useState<SessionOut[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
 
-  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
   const [fileViewError, setFileViewError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -115,11 +115,40 @@ export const AiService = () => {
     }
   };
 
-  const toggleSourceExpand = (index: number) => {
-    setExpandedSources((prev) => ({
+  const toggleGroup = (documentId: string) => {
+    setExpandedGroups((prev) => ({
       ...prev,
-      [index]: !prev[index],
+      [documentId]: !prev[documentId],
     }));
+  };
+
+  const groupSourcesByDocument = (sources: SourceRef[]) => {
+    const groups = new Map<
+      string,
+      { documentId: string; fileName: string; maxScore?: number; chunks: SourceRef[] }
+    >();
+    for (const src of sources) {
+      const existing = groups.get(src.documentId);
+      if (existing) {
+        existing.chunks.push(src);
+        if (typeof src.score === 'number') {
+          existing.maxScore = Math.max(existing.maxScore ?? -Infinity, src.score);
+        }
+      } else {
+        groups.set(src.documentId, {
+          documentId: src.documentId,
+          fileName: src.fileName,
+          maxScore: src.score,
+          chunks: [src],
+        });
+      }
+    }
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        chunks: [...group.chunks].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)),
+      }))
+      .sort((a, b) => (b.maxScore ?? -Infinity) - (a.maxScore ?? -Infinity));
   };
 
   const handleViewSourceFile = async (documentId: string) => {
@@ -153,7 +182,7 @@ export const AiService = () => {
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
     setCurrentSources([]);
-    setExpandedSources({});
+    setExpandedGroups({});
     setCurrentProgress(null);
     setCopiedIndex(null);
   };
@@ -177,7 +206,7 @@ export const AiService = () => {
         .reverse()
         .find((t) => t.role === 'assistant' && t.sources && t.sources.length > 0);
       setCurrentSources(lastAiTurnWithSources?.sources ?? []);
-      setExpandedSources({});
+      setExpandedGroups({});
       setCurrentProgress(null);
       setCopiedIndex(null);
     } catch {
@@ -444,7 +473,7 @@ export const AiService = () => {
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
     setCurrentSources([]);
-    setExpandedSources({});
+    setExpandedGroups({});
     setCurrentProgress(null);
 
     let accumulated = '';
@@ -759,49 +788,66 @@ export const AiService = () => {
                   <div className="source-refs">
                     <span className="source-refs-label">참고 문서</span>
                     <ul className="source-refs-list">
-                      {[...currentSources]
-                        .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity))
-                        .map((src, i) => {
-                        const isExpanded = !!expandedSources[i];
+                      {groupSourcesByDocument(currentSources).map((group) => {
+                        const isExpanded = !!expandedGroups[group.documentId];
                         return (
-                          <li key={i} className="source-ref-item-container">
+                          <li key={group.documentId} className="source-ref-item-container">
                             <button
                               type="button"
                               className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
-                              onClick={() => toggleSourceExpand(i)}
+                              onClick={() => toggleGroup(group.documentId)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
-                                  toggleSourceExpand(i);
+                                  toggleGroup(group.documentId);
                                 }
                               }}
                               aria-expanded={isExpanded}
                             >
-                              <span className="source-ref-name">{src.fileName}</span>
-                              <span className="source-ref-chunk">청크 {src.chunkIndex}</span>
-                              {typeof src.score === 'number' && (
+                              <span className="source-ref-name">{group.fileName}</span>
+                              <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
+                              {typeof group.maxScore === 'number' && (
                                 <span className="source-ref-score">
-                                  관련도 {Math.round(src.score * 100)}%
+                                  최고 관련도 {Math.round(group.maxScore * 100)}%
                                 </span>
                               )}
-                              {src.snippet && (
-                                <span className="source-ref-toggle-icon" aria-hidden="true">
-                                  {isExpanded ? '▲' : '▼'}
-                                </span>
-                              )}
+                              <span className="source-ref-toggle-icon" aria-hidden="true">
+                                {isExpanded ? '▲' : '▼'}
+                              </span>
                             </button>
                             <button
                               type="button"
                               className="source-ref-view-btn"
-                              onClick={() => handleViewSourceFile(src.documentId)}
-                              disabled={viewingFileId === src.documentId}
+                              onClick={() => handleViewSourceFile(group.documentId)}
+                              disabled={viewingFileId === group.documentId}
                             >
-                              {viewingFileId === src.documentId ? '불러오는 중…' : '원문 보기'}
+                              {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
                             </button>
-                            {isExpanded && src.snippet && (
-                              <div className="source-ref-snippet" data-testid={`source-snippet-${i}`}>
-                                {src.snippet}
-                              </div>
+                            {isExpanded && (
+                              <ul className="source-group-chunks">
+                                {group.chunks.map((chunk) => (
+                                  <li key={chunk.chunkIndex} className="source-chunk-item">
+                                    <div className="source-chunk-meta">
+                                      <span className="source-ref-chunk">
+                                        청크 {chunk.chunkIndex}
+                                      </span>
+                                      {typeof chunk.score === 'number' && (
+                                        <span className="source-ref-score">
+                                          관련도 {Math.round(chunk.score * 100)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                    {chunk.snippet && (
+                                      <div
+                                        className="source-ref-snippet"
+                                        data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
+                                      >
+                                        {chunk.snippet}
+                                      </div>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </li>
                         );
