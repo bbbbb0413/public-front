@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import { createPayment, getPayment, PaymentReply } from '../api/payment';
+import React, { useRef, useState } from 'react';
+import {
+  classifyPaymentError,
+  createIdempotencyKey,
+  createPayment,
+  getPayment,
+  PaymentReply,
+} from '../api/payment';
 import './Payment.css';
 
 interface Product {
@@ -34,6 +40,51 @@ const PRODUCTS: Product[] = [
   },
 ];
 
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED']);
+const POLL_INTERVAL_MS = 2000;
+const POLL_MAX_ATTEMPTS = 10;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const statusClassName = (status: string): string => {
+  if (status === 'COMPLETED') return 'status-success';
+  if (status === 'FAILED') return 'status-failed';
+  return 'status-pending';
+};
+
+const receiptTitleClassName = (status: string): string => {
+  if (status === 'COMPLETED') return 'receipt-title receipt-title--success';
+  if (status === 'FAILED') return 'receipt-title receipt-title--failed';
+  return 'receipt-title receipt-title--pending';
+};
+
+const receiptCopy = (status: string): { title: string; desc: string } => {
+  if (status === 'COMPLETED') {
+    return { title: '결제가 완료되었습니다!', desc: '주문 상세 정보는 아래와 같습니다.' };
+  }
+  if (status === 'FAILED') {
+    return {
+      title: '결제에 실패했습니다',
+      desc: '결제가 정상적으로 처리되지 않았습니다. 다시 시도해 주세요.',
+    };
+  }
+  return {
+    title: '결제를 확인하고 있습니다',
+    desc: '잠시만 기다려 주세요. 확인이 끝나면 자동으로 갱신됩니다.',
+  };
+};
+
+const purchaseErrorMessage = (error: unknown): string => {
+  switch (classifyPaymentError(error)) {
+    case 'validation':
+      return '결제 요청 정보를 확인해 주세요.';
+    case 'conflict':
+      return '이미 처리 중인 결제입니다. 잠시 후 조회해 주세요.';
+    default:
+      return '결제 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+  }
+};
+
 export const Payment = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -43,6 +94,29 @@ export const Payment = () => {
   const [queryResult, setQueryResult] = useState<PaymentReply | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState('');
+
+  // 응답을 받지 못한(네트워크 오류 등) 시도에 한해 같은 멱등키를 재사용하기 위한 참조.
+  // 서버 응답을 확정적으로 받으면(성공/실패 무관) 다음 구매는 새 시도로 간주해 초기화한다.
+  const pendingAttemptRef = useRef<{ productId: string; idempotencyKey: string } | null>(null);
+  const activePaymentIdRef = useRef<number | null>(null);
+
+  const pollForFinalStatus = async (paymentId: number): Promise<PaymentReply | null> => {
+    for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+      await wait(POLL_INTERVAL_MS);
+      if (activePaymentIdRef.current !== paymentId) {
+        return null; // 사용자가 다른 결제를 시작해 이 폴링은 더 이상 유효하지 않다.
+      }
+      try {
+        const latest = await getPayment(paymentId);
+        if (TERMINAL_STATUSES.has(latest.status)) {
+          return latest;
+        }
+      } catch {
+        // 조회 실패는 무시하고 다음 폴링에서 재시도한다.
+      }
+    }
+    return null;
+  };
 
   const handleQuery = async () => {
     const id = parseInt(queryId, 10);
@@ -64,14 +138,35 @@ export const Payment = () => {
   };
 
   const handlePurchase = async (product: Product) => {
+    const idempotencyKey =
+      pendingAttemptRef.current?.productId === product.productId
+        ? pendingAttemptRef.current.idempotencyKey
+        : createIdempotencyKey();
+    pendingAttemptRef.current = { productId: product.productId, idempotencyKey };
+
     setLoading(true);
     setError('');
     setReceipt(null);
     try {
-      const result = await createPayment(product.amount, product.currency, product.productId);
+      const result = await createPayment(product.amount, product.currency, product.productId, idempotencyKey);
+      // 서버로부터 확정 응답을 받았으므로, 다음 클릭은 새로운 시도로 취급한다.
+      pendingAttemptRef.current = null;
+      activePaymentIdRef.current = result.paymentId;
       setReceipt(result);
+
+      if (!TERMINAL_STATUSES.has(result.status)) {
+        const final = await pollForFinalStatus(result.paymentId);
+        if (activePaymentIdRef.current === result.paymentId) {
+          if (final) {
+            setReceipt(final);
+          } else {
+            setError('결제 확인이 지연되고 있습니다. 결제 조회에서 최종 상태를 확인해 주세요.');
+          }
+        }
+      }
     } catch (err) {
-      setError('결제 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      // 요청 자체가 응답 없이 실패했을 수 있으므로 pendingAttemptRef를 유지해, 재시도 시 같은 멱등키를 사용한다.
+      setError(purchaseErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -106,8 +201,8 @@ export const Payment = () => {
       {receipt && (
         <div className="receipt-overlay">
           <div className="receipt-modal glass-panel">
-            <h3 className="receipt-title">결제가 완료되었습니다!</h3>
-            <p className="receipt-desc">주문 상세 정보는 아래와 같습니다.</p>
+            <h3 className={receiptTitleClassName(receipt.status)}>{receiptCopy(receipt.status).title}</h3>
+            <p className="receipt-desc">{receiptCopy(receipt.status).desc}</p>
             <div className="receipt-details">
               <div className="receipt-row">
                 <span>결제 ID</span>
@@ -125,10 +220,16 @@ export const Payment = () => {
               </div>
               <div className="receipt-row">
                 <span>결제 상태</span>
-                <span className="status-success">{receipt.status}</span>
+                <span className={statusClassName(receipt.status)}>{receipt.status}</span>
               </div>
             </div>
-            <button onClick={() => setReceipt(null)} className="receipt-close-btn">
+            <button
+              onClick={() => {
+                activePaymentIdRef.current = null;
+                setReceipt(null);
+              }}
+              className="receipt-close-btn"
+            >
               닫기
             </button>
           </div>
@@ -175,7 +276,7 @@ export const Payment = () => {
             </div>
             <div className="receipt-row">
               <span>결제 상태</span>
-              <span className="status-success">{queryResult.status}</span>
+              <span className={statusClassName(queryResult.status)}>{queryResult.status}</span>
             </div>
           </div>
         )}

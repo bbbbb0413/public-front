@@ -13,7 +13,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-import { createPayment, getPayment } from './payment';
+import { classifyPaymentError, createPayment, getPayment } from './payment';
 
 const mockAxios = axios as unknown as {
   post: ReturnType<typeof vi.fn>;
@@ -34,7 +34,7 @@ describe('payment API', () => {
           amount: 5000,
           currency: 'KRW',
           productId: 'gold_500',
-          status: 'SUCCESS',
+          status: 'COMPLETED',
         },
       },
     });
@@ -46,7 +46,29 @@ describe('payment API', () => {
       idempotencyKey: expect.any(String),
     });
     expect(result.paymentId).toBe(101);
-    expect(result.status).toBe('SUCCESS');
+    expect(result.status).toBe('COMPLETED');
+  });
+
+  it('createPayment reuses a caller-supplied idempotencyKey instead of generating a new one', async () => {
+    mockAxios.post.mockResolvedValueOnce({
+      data: {
+        data: {
+          paymentId: 101,
+          accountId: 42,
+          amount: 5000,
+          currency: 'KRW',
+          productId: 'gold_500',
+          status: 'COMPLETED',
+        },
+      },
+    });
+    await createPayment(5000, 'KRW', 'gold_500', 'fixed-retry-key');
+    expect(mockAxios.post).toHaveBeenCalledWith('/payments', {
+      amount: 5000,
+      currency: 'KRW',
+      productId: 'gold_500',
+      idempotencyKey: 'fixed-retry-key',
+    });
   });
 
   it('getPayment fetches payment by id', async () => {
@@ -58,7 +80,7 @@ describe('payment API', () => {
           amount: 5000,
           currency: 'KRW',
           productId: 'gold_500',
-          status: 'SUCCESS',
+          status: 'COMPLETED',
         },
       },
     });
@@ -66,5 +88,20 @@ describe('payment API', () => {
     expect(mockAxios.get).toHaveBeenCalledWith('/payments/101');
     expect(result.paymentId).toBe(101);
     expect(result.productId).toBe('gold_500');
+  });
+});
+
+describe('classifyPaymentError', () => {
+  it('classifies HTTP 409 as conflict', () => {
+    expect(classifyPaymentError({ response: { status: 409 } })).toBe('conflict');
+  });
+
+  it('classifies other 4xx as validation', () => {
+    expect(classifyPaymentError({ response: { status: 400 } })).toBe('validation');
+  });
+
+  it('classifies 5xx and network errors (no response) as server', () => {
+    expect(classifyPaymentError({ response: { status: 500 } })).toBe('server');
+    expect(classifyPaymentError(new Error('network down'))).toBe('server');
   });
 });

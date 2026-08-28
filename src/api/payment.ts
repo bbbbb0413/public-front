@@ -9,7 +9,25 @@ export interface PaymentReply {
   status: string;
 }
 
-const createIdempotencyKey = (): string =>
+export type PaymentErrorKind = 'validation' | 'conflict' | 'server';
+
+interface HttpErrorLike {
+  response?: { status?: number };
+}
+
+const isHttpErrorLike = (error: unknown): error is HttpErrorLike =>
+  typeof error === 'object' && error !== null && 'response' in error;
+
+export const classifyPaymentError = (error: unknown): PaymentErrorKind => {
+  if (isHttpErrorLike(error)) {
+    const status = error.response?.status;
+    if (status === 409) return 'conflict';
+    if (status !== undefined && status >= 400 && status < 500) return 'validation';
+  }
+  return 'server';
+};
+
+export const createIdempotencyKey = (): string =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -17,9 +35,9 @@ const createIdempotencyKey = (): string =>
 export const createPayment = async (
   amount: number,
   currency: string,
-  productId: string
+  productId: string,
+  idempotencyKey: string = createIdempotencyKey()
 ): Promise<PaymentReply> => {
-  const idempotencyKey = createIdempotencyKey();
   const response = await client.post('/payments', { amount, currency, productId, idempotencyKey });
   return response.data?.data;
 };

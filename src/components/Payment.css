@@ -139,7 +139,18 @@
 .receipt-title {
   font-size: 1.25rem;
   font-weight: 700;
+}
+
+.receipt-title--success {
   color: var(--color-success);
+}
+
+.receipt-title--failed {
+  color: var(--color-danger);
+}
+
+.receipt-title--pending {
+  color: var(--color-warning);
 }
 
 .receipt-desc {
@@ -169,6 +180,16 @@
 
 .status-success {
   color: var(--color-success);
+  font-weight: 700;
+}
+
+.status-failed {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.status-pending {
+  color: var(--color-warning);
   font-weight: 700;
 }
 

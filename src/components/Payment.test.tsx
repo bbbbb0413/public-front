@@ -1,5 +1,5 @@
 import { render, screen, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { Payment } from './Payment';
 import axios from 'axios';
@@ -30,12 +30,23 @@ const mockAuthValue = {
   logout: vi.fn(),
 };
 
+const renderPayment = () =>
+  render(
+    <AuthContext.Provider value={mockAuthValue}>
+      <Payment />
+    </AuthContext.Provider>
+  );
+
 describe('Payment Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders product items and purchases when clicked', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders product items and purchases when the payment completes', async () => {
     const mockPaymentResponse = {
       data: {
         data: {
@@ -44,22 +55,18 @@ describe('Payment Component', () => {
           amount: 1000,
           currency: 'KRW',
           productId: 'gold_100',
-          status: 'SUCCESS',
+          status: 'COMPLETED',
         },
       },
     };
 
     vi.mocked(axios.post).mockResolvedValueOnce(mockPaymentResponse);
 
-    render(
-      <AuthContext.Provider value={mockAuthValue}>
-        <Payment />
-      </AuthContext.Provider>
-    );
+    renderPayment();
 
     // 상품 카드 확인
     expect(screen.getByText('100 Gold Coins')).toBeInTheDocument();
-    
+
     // 구매 버튼 클릭
     const buyBtn = screen.getAllByRole('button', { name: /구매하기/i })[0];
     await act(async () => {
@@ -76,5 +83,108 @@ describe('Payment Component', () => {
     // 영수증 확인
     expect(screen.getByText('결제가 완료되었습니다!')).toBeInTheDocument();
     expect(screen.getByText(/999/)).toBeInTheDocument(); // Payment ID
+  });
+
+  it('shows a failure message and failed styling when the backend reports FAILED', async () => {
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        data: {
+          paymentId: 998,
+          accountId: 101,
+          amount: 1000,
+          currency: 'KRW',
+          productId: 'gold_100',
+          status: 'FAILED',
+        },
+      },
+    });
+
+    renderPayment();
+    const buyBtn = screen.getAllByRole('button', { name: /구매하기/i })[0];
+    await act(async () => {
+      buyBtn.click();
+    });
+
+    expect(screen.getByText('결제에 실패했습니다')).toBeInTheDocument();
+    expect(screen.queryByText('결제가 완료되었습니다!')).not.toBeInTheDocument();
+    expect(screen.getByText('FAILED')).toHaveClass('status-failed');
+  });
+
+  it('reuses the same idempotencyKey when retrying after a network error', async () => {
+    vi.mocked(axios.post).mockRejectedValueOnce(new Error('network down'));
+
+    renderPayment();
+    const buyBtn = screen.getAllByRole('button', { name: /구매하기/i })[0];
+    await act(async () => {
+      buyBtn.click();
+    });
+
+    expect(screen.getByText('결제 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.')).toBeInTheDocument();
+    const firstKey = (vi.mocked(axios.post).mock.calls[0][1] as { idempotencyKey: string }).idempotencyKey;
+
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        data: {
+          paymentId: 997,
+          accountId: 101,
+          amount: 1000,
+          currency: 'KRW',
+          productId: 'gold_100',
+          status: 'COMPLETED',
+        },
+      },
+    });
+
+    await act(async () => {
+      buyBtn.click();
+    });
+
+    const secondKey = (vi.mocked(axios.post).mock.calls[1][1] as { idempotencyKey: string }).idempotencyKey;
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it('polls for the final status when the payment starts as PENDING', async () => {
+    vi.useFakeTimers();
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: {
+        data: {
+          paymentId: 555,
+          accountId: 101,
+          amount: 1000,
+          currency: 'KRW',
+          productId: 'gold_100',
+          status: 'PENDING',
+        },
+      },
+    });
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          paymentId: 555,
+          accountId: 101,
+          amount: 1000,
+          currency: 'KRW',
+          productId: 'gold_100',
+          status: 'COMPLETED',
+        },
+      },
+    });
+
+    renderPayment();
+    const buyBtn = screen.getAllByRole('button', { name: /구매하기/i })[0];
+
+    await act(async () => {
+      buyBtn.click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByText('결제를 확인하고 있습니다')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(axios.get).toHaveBeenCalledWith('/payments/555');
+    expect(screen.getByText('결제가 완료되었습니다!')).toBeInTheDocument();
   });
 });
