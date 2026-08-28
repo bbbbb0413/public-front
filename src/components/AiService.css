@@ -464,6 +464,41 @@
   border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+.message-bubble p {
+  margin: 0 0 0.6em;
+}
+
+.message-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.message-bubble table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.85em;
+}
+
+.message-bubble th,
+.message-bubble td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-bubble th {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.message-bubble tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .message-actions {
   display: flex;
   justify-content: flex-end;

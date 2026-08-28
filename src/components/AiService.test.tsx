@@ -2457,5 +2457,52 @@ describe('AiService Component', () => {
       expect(screen.queryByRole('dialog', { name: /문서 삭제 확인/i })).not.toBeInTheDocument();
     });
   });
+
+  describe('마크다운 표·HTML 태그 렌더링', () => {
+    it('Given AI 답변에 GFM 표 문법과 <br> 태그가 섞여 있을 때 When 답변이 렌더링되면 Then 파이프 문자가 그대로 보이지 않고 실제 <table>과 줄바꿈으로 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const tableAnswer =
+        '| 구분 | 내용 |\n|------|------|\n| 거주자 요건 | 서울 거주자 <br> 10년 이상 |';
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        onMessage(tableAnswer);
+        onDone();
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '입주조건' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 실제 <table> 구조로 렌더링되어야 한다(원시 파이프 문법이 텍스트로 남지 않는다)
+      const table = screen.getByRole('table');
+      expect(table).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: '구분' })).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: '거주자 요건' })).toBeInTheDocument();
+
+      // <br> 태그가 텍스트로 남지 않고 실제 줄바꿈 요소로 렌더링되어야 한다
+      const contentCell = screen
+        .getAllByRole('cell')
+        .find((cell) => cell.textContent?.includes('10년 이상'));
+      expect(contentCell?.textContent).not.toContain('<br>');
+      expect(contentCell?.querySelector('br')).toBeInTheDocument();
+    });
+  });
 });
 

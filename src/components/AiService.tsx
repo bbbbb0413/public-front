@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import {
   getDocuments,
   uploadDocument,
@@ -42,6 +45,13 @@ const PHASE_LABELS: Record<AgentPhase, string> = {
   critiquing: '답변을 검토하고 평가하는 중',
   refining: '답변을 보완하고 다듬는 중',
 };
+
+// AI 답변에 표/개행이 마크다운 표(GFM)나 <br> 태그로 섞여 나올 때가 있어
+// remark-gfm(표 파싱)과 rehype-raw + rehype-sanitize(안전한 태그만 허용해 raw
+// HTML 렌더링)를 함께 사용한다. 두 상수 모두 매 렌더마다 새 배열을 만들지
+// 않도록 모듈 스코프에 둔다.
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
 
 export const AiService = () => {
   const authCtx = useContext(AuthContext);
@@ -723,7 +733,12 @@ export const AiService = () => {
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
                         <>
-                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                          <ReactMarkdown
+                            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                          >
+                            {msg.text}
+                          </ReactMarkdown>
                           {msg.confidence !== undefined && (
                             <div className="confidence-badge" data-testid="confidence-badge">
                               <span className="confidence-label">신뢰도:</span>
@@ -775,7 +790,12 @@ export const AiService = () => {
                       )}
                       {streamingAnswer ? (
                         <>
-                          <ReactMarkdown>{streamingAnswer}</ReactMarkdown>
+                          <ReactMarkdown
+                            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                          >
+                            {streamingAnswer}
+                          </ReactMarkdown>
                           <span className="cursor">|</span>
                         </>
                       ) : (
