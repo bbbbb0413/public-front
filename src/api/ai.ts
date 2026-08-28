@@ -1,6 +1,117 @@
 import client from './client';
+import { createIdempotencyKey } from '../utils/idempotency-key';
 
 const GATEWAY_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+const MAX_STREAM_RECONNECT_ATTEMPTS = 3;
+const STREAM_RECONNECT_BASE_DELAY_MS = 1000;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+interface ParsedSseEvent {
+  id?: string;
+  type: string;
+  data: unknown;
+}
+
+const parseSseEvent = (block: string): ParsedSseEvent | null => {
+  const lines = block.split('\n');
+  const idLine = lines.find((line) => line.startsWith('id:'));
+  const dataLine = lines.find((line) => line.startsWith('data:'));
+  if (!dataLine) return null;
+  try {
+    const parsed = JSON.parse(dataLine.slice(5).trim());
+    return {
+      id: idLine ? idLine.slice(3).trim() : undefined,
+      type: parsed.type,
+      data: parsed.data,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * 잡 SSE 스트림에 연결해 이벤트를 순서대로 onEvent에 전달한다.
+ * fetch/네트워크 자체가 끊기면(응답을 못 받거나 스트림 도중 예외) 마지막으로 받은
+ * 이벤트 id를 Last-Event-ID로 실어 재접속한다 — 서버(RedisStreamsRelayService)가
+ * 그 지점부터 이벤트를 재생해준다. done/error로 정상 종료되거나 순수하게 스트림이
+ * 자연 종료되는 경우(터미널 이벤트 없이 끝) 재접속하지 않는다.
+ *
+ * onEvent가 true를 반환하면 터미널 이벤트로 간주해 더 이상 읽지 않는다.
+ */
+const connectJobStream = async (
+  jobId: string,
+  onEvent: (event: ParsedSseEvent) => boolean,
+  signal: AbortSignal,
+): Promise<void> => {
+  let lastEventId: string | undefined;
+  let attempt = 0;
+
+  while (true) {
+    try {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = {
+        Authorization: token ? `Bearer ${token}` : '',
+        Accept: 'text/event-stream',
+      };
+      if (lastEventId) headers['Last-Event-ID'] = lastEventId;
+
+      const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${jobId}/stream`, {
+        method: 'GET',
+        headers,
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('ReadableStream not supported');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          const event = parseSseEvent(block);
+          if (!event) continue;
+          if (event.id) lastEventId = event.id;
+          if (onEvent(event)) return;
+        }
+      }
+
+      if (buffer.trim()) {
+        const event = parseSseEvent(buffer);
+        if (event) {
+          if (event.id) lastEventId = event.id;
+          onEvent(event);
+        }
+      }
+      return;
+    } catch (err) {
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return;
+      }
+      attempt += 1;
+      if (attempt > MAX_STREAM_RECONNECT_ATTEMPTS) {
+        throw err;
+      }
+      await wait(STREAM_RECONNECT_BASE_DELAY_MS * attempt);
+    }
+  }
+};
 
 export const getDocuments = async () => {
   const response = await client.get('/ai/knowledge/documents');
@@ -35,85 +146,38 @@ export const subscribeIngestJob = (
     controller.abort();
   };
 
-  const run = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${jobId}/stream`, {
-        method: 'GET',
-        headers: {
-          Authorization: token ? `Bearer ${token}` : '',
-          Accept: 'text/event-stream',
-        },
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('ReadableStream not supported');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const handleBlock = (block: string): boolean => {
-        const event = parseSseEvent(block);
-        if (!event) return false;
-
-        if (event.type === 'done') {
-          close();
-          callbacks.onDone?.();
-          return true;
-        } else if (event.type === 'error') {
-          close();
-          let errorMessage = '인제스트 처리 중 오류가 발생했습니다.';
-          if (typeof event.data === 'string') {
-            errorMessage = event.data;
-          } else if (event.data && typeof event.data === 'object') {
-            const dataObj = event.data as Record<string, unknown>;
-            if (typeof dataObj.error === 'string') {
-              errorMessage = dataObj.error;
-            } else if (typeof dataObj.message === 'string') {
-              errorMessage = dataObj.message;
-            }
-          }
-          callbacks.onError?.(errorMessage);
-          return true;
-        }
-        return false;
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split('\n\n');
-        buffer = blocks.pop() || '';
-
-        for (const block of blocks) {
-          if (!block.trim()) continue;
-          if (handleBlock(block)) return;
-        }
-      }
-
-      if (buffer.trim()) {
-        handleBlock(buffer);
-      }
-    } catch (err: unknown) {
-      if (isClosed || (err instanceof DOMException && err.name === 'AbortError')) {
-        return;
-      }
+  const handleEvent = (event: ParsedSseEvent): boolean => {
+    if (event.type === 'done') {
       close();
-      const message = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-      callbacks.onError?.(message);
+      callbacks.onDone?.();
+      return true;
+    } else if (event.type === 'error') {
+      close();
+      let errorMessage = '인제스트 처리 중 오류가 발생했습니다.';
+      if (typeof event.data === 'string') {
+        errorMessage = event.data;
+      } else if (event.data && typeof event.data === 'object') {
+        const dataObj = event.data as Record<string, unknown>;
+        if (typeof dataObj.error === 'string') {
+          errorMessage = dataObj.error;
+        } else if (typeof dataObj.message === 'string') {
+          errorMessage = dataObj.message;
+        }
+      }
+      callbacks.onError?.(errorMessage);
+      return true;
     }
+    return false;
   };
 
-  run();
+  connectJobStream(jobId, handleEvent, controller.signal).catch((err: unknown) => {
+    if (isClosed || (err instanceof DOMException && err.name === 'AbortError')) {
+      return;
+    }
+    close();
+    const message = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+    callbacks.onError?.(message);
+  });
 
   return close;
 };
@@ -159,8 +223,8 @@ export type AgentPhase = 'searching' | 'generating' | 'critiquing' | 'refining';
 export interface AgentProgress {
   iteration: number;
   phase: AgentPhase;
-  confidence: number;
-  missing: string[];
+  confidence?: number;
+  missing?: string[];
 }
 
 export interface SessionOut {
@@ -209,16 +273,6 @@ interface JobAcceptedOut {
   jobId: string;
 }
 
-const parseSseEvent = (block: string): { type: string; data: unknown } | null => {
-  const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
-  if (!dataLine) return null;
-  try {
-    return JSON.parse(dataLine.slice(5).trim());
-  } catch {
-    return null;
-  }
-};
-
 export interface AskQuestionStreamHandle extends Promise<void> {
   cancel?: () => Promise<void>;
 }
@@ -261,7 +315,8 @@ export const askQuestionStream = (
         content: m.text,
       }));
 
-      const body: Record<string, unknown> = { question };
+      const idempotencyKey = createIdempotencyKey();
+      const body: Record<string, unknown> = { question, idempotencyKey };
       if (conversationHistory.length > 0) body.conversationHistory = conversationHistory;
       if (sessionId) body.sessionId = sessionId;
 
@@ -277,32 +332,9 @@ export const askQuestionStream = (
         return;
       }
 
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${GATEWAY_BASE_URL}/ai/jobs/${job.jobId}/stream`, {
-        method: 'GET',
-        headers: {
-          Authorization: token ? `Bearer ${token}` : '',
-          Accept: 'text/event-stream',
-        },
-        signal: controller.signal,
-      });
+      let completed = false;
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('ReadableStream not supported');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const handleBlock = (block: string): boolean => {
-        const event = parseSseEvent(block);
-        if (!event) return false;
-
+      const handleEvent = (event: ParsedSseEvent): boolean => {
         if (event.type === 'session' && onSessionId) {
           onSessionId(event.data as string);
         } else if (event.type === 'sources' && onSources) {
@@ -322,6 +354,7 @@ export const askQuestionStream = (
         } else if (event.type === 'token') {
           onMessage(event.data as string);
         } else if (event.type === 'done') {
+          completed = true;
           let finalMeta: { confidence?: number; missing?: string[] } | undefined = undefined;
           if (event.data) {
             if (typeof event.data === 'string') {
@@ -337,29 +370,15 @@ export const askQuestionStream = (
           onDone(finalMeta);
           return true;
         } else if (event.type === 'error') {
+          completed = true;
           onError(new Error((event.data as string) ?? '알 수 없는 오류'));
           return true;
         }
         return false;
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split('\n\n');
-        buffer = blocks.pop() || '';
-
-        for (const block of blocks) {
-          if (!block.trim()) continue;
-          if (handleBlock(block)) return;
-        }
-      }
-
-      if (buffer.trim()) {
-        handleBlock(buffer);
-      } else {
+      await connectJobStream(job.jobId, handleEvent, controller.signal);
+      if (!completed && !isCancelled) {
         onDone();
       }
     } catch (error) {

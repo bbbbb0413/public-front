@@ -1,4 +1,7 @@
 import client from './client';
+import { createIdempotencyKey } from '../utils/idempotency-key';
+
+export { createIdempotencyKey };
 
 export interface PaymentReply {
   paymentId: number;
@@ -36,11 +39,6 @@ export const classifyPaymentError = (error: unknown): PaymentErrorKind => {
   }
   return 'server';
 };
-
-export const createIdempotencyKey = (): string =>
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 export const createPayment = async (
   amount: number,

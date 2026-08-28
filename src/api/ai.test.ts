@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import axios from 'axios';
 
 vi.mock('axios', () => ({
@@ -35,6 +35,10 @@ describe('AI Service API (Gateway 경유)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('getDocuments should fetch list of documents via gateway', async () => {
@@ -289,7 +293,10 @@ describe('AI Service API (Gateway 경유)', () => {
 
     await askQuestionStream('Test question', onMessage, onDone, onError);
 
-    expect(mockAxios.post).toHaveBeenCalledWith('/ai/rag/jobs', { question: 'Test question' });
+    expect(mockAxios.post).toHaveBeenCalledWith('/ai/rag/jobs', {
+      question: 'Test question',
+      idempotencyKey: expect.any(String),
+    });
     expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3000/ai/jobs/job-42/stream', {
       method: 'GET',
       headers: {
@@ -646,5 +653,51 @@ describe('AI Service API (Gateway 경유)', () => {
     await cancelPromise;
 
     expect(mockAxios.delete).toHaveBeenCalledWith('/ai/jobs/job-late');
+  });
+
+  it('askQuestionStream reconnects with Last-Event-ID when the stream drops mid-way', async () => {
+    vi.useFakeTimers();
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-reconnect' } });
+
+    const firstStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('id: 1\ndata: {"type":"token","data":"Hel"}\n\n'));
+      },
+      pull(controller) {
+        // 첫 청크가 소비된 뒤 호출됨 — 이 시점에 연결이 끊긴 상황을 흉내낸다.
+        controller.error(new Error('network drop'));
+      },
+    });
+
+    const secondStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('id: 2\ndata: {"type":"token","data":"lo"}\n\n'));
+        controller.enqueue(new TextEncoder().encode('id: 3\ndata: {"type":"done"}\n\n'));
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, body: firstStream, headers: new Headers() })
+      .mockResolvedValueOnce({ ok: true, body: secondStream, headers: new Headers() });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    const promise = askQuestionStream('Test question', onMessage, onDone, onError);
+    await vi.advanceTimersByTimeAsync(2000);
+    await promise;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const secondCallHeaders = fetchSpy.mock.calls[1][1].headers as Record<string, string>;
+    expect(secondCallHeaders['Last-Event-ID']).toBe('1');
+    expect(onMessage).toHaveBeenNthCalledWith(1, 'Hel');
+    expect(onMessage).toHaveBeenNthCalledWith(2, 'lo');
+    expect(onDone).toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 });
