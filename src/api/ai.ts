@@ -264,6 +264,45 @@ export const deleteSessionById = async (sessionId: string): Promise<void> => {
   await client.delete(`/ai/rag/sessions/${sessionId}`);
 };
 
+/** 답변 평가.
+ *
+ * 답변에는 고유 식별자가 없다. 세션 안 턴 위치(`turnIndex`)로 지목한다 —
+ * 턴은 덧붙이기만 하므로 나중에 위치가 밀리지 않는다.
+ */
+export interface AnswerFeedbackOut {
+  sessionId: string;
+  turnIndex: number;
+  accuracy: number;
+  helpfulness: number;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubmitAnswerFeedbackIn {
+  sessionId: string;
+  turnIndex: number;
+  accuracy: number;
+  helpfulness: number;
+  comment?: string;
+}
+
+/** 평가 제출. 이미 평가한 답변이면 갱신된다. */
+export const submitAnswerFeedback = async (
+  input: SubmitAnswerFeedbackIn,
+): Promise<AnswerFeedbackOut> => {
+  const response = await client.post('/ai/feedback', input);
+  return response.data;
+};
+
+/** 한 세션에서 내가 남긴 평가 전부. */
+export const getSessionFeedback = async (
+  sessionId: string,
+): Promise<AnswerFeedbackOut[]> => {
+  const response = await client.get('/ai/feedback', { params: { sessionId } });
+  return response.data ?? [];
+};
+
 /** 답변 근거로 인용된 문서의 원본 파일을 blob으로 받아온다. */
 export const getDocumentFile = async (documentId: string): Promise<Blob> => {
   const response = await client.get(`/ai/knowledge/documents/${documentId}/file`, {

@@ -20,8 +20,12 @@ import {
   AgentProgress,
   AgentPhase,
   MyPromptOut,
+  AnswerFeedbackOut,
+  submitAnswerFeedback,
+  getSessionFeedback,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
+import { AnswerFeedback } from './AnswerFeedback';
 import './AiService.css';
 
 interface DocumentInfo {
@@ -78,6 +82,8 @@ export const AiService = () => {
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
   const [fileViewError, setFileViewError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  // 턴 번호 -> 내 평가. 답변에 고유 id 가 없어 세션 안 위치로 찾는다.
+  const [feedbackByTurn, setFeedbackByTurn] = useState<Record<number, AnswerFeedbackOut>>({});
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
@@ -195,6 +201,29 @@ export const AiService = () => {
     setExpandedGroups({});
     setCurrentProgress(null);
     setCopiedIndex(null);
+    setFeedbackByTurn({});
+  };
+
+  /** 이 세션에서 내가 남긴 평가를 불러와 턴 번호로 색인한다. */
+  const loadFeedback = async (sid: string) => {
+    try {
+      const items = await getSessionFeedback(sid);
+      setFeedbackByTurn(
+        Object.fromEntries(items.map((f) => [f.turnIndex, f])),
+      );
+    } catch {
+      // 평가는 부수 정보다. 못 불러와도 대화 자체는 열려야 한다.
+      setFeedbackByTurn({});
+    }
+  };
+
+  const handleSubmitFeedback = async (
+    turnIndex: number,
+    input: { accuracy: number; helpfulness: number; comment?: string },
+  ) => {
+    if (!sessionId) return;
+    const saved = await submitAnswerFeedback({ sessionId, turnIndex, ...input });
+    setFeedbackByTurn((prev) => ({ ...prev, [turnIndex]: saved }));
   };
 
   const handleLoadSession = async (sid: string) => {
@@ -210,6 +239,7 @@ export const AiService = () => {
         missing: t.missing,
       }));
       setChatLog(loaded);
+      await loadFeedback(detail.sessionId);
       setStreamingAnswer('');
       streamingAnswerRef.current = '';
       const lastAiTurnWithSources = [...detail.turns]
@@ -778,6 +808,13 @@ export const AiService = () => {
                               {copiedIndex === idx ? '복사됨' : '복사'}
                             </button>
                           </div>
+                          {sessionId && (
+                            <AnswerFeedback
+                              key={`${sessionId}-${idx}`}
+                              existing={feedbackByTurn[idx]}
+                              onSubmit={(input) => handleSubmitFeedback(idx, input)}
+                            />
+                          )}
                         </>
                       ) : (
                         msg.text

@@ -16,6 +16,8 @@ vi.mock('../api/ai', () => {
     deleteSessionById: vi.fn(),
     subscribeIngestJob: vi.fn(),
     getDocumentFile: vi.fn(),
+    submitAnswerFeedback: vi.fn(),
+    getSessionFeedback: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -1679,6 +1681,118 @@ describe('AiService Component', () => {
       // 참고 문서 목록 2개 표시 확인
       expect(screen.getByText('refund_policy.pdf')).toBeInTheDocument();
       expect(screen.getByText('terms.pdf')).toBeInTheDocument();
+    });
+
+    it('Given 세션을 복원한 상황 When 답변에 이미 남긴 평가가 있으면 Then 해당 답변에 내 최신 평가가 표시된다 (SPEC-024)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-1', title: '평가한 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-1',
+        title: '평가한 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '환불 규정 알려줘', createdAt: '2026-08-28T01:00:00Z' },
+          {
+            role: 'assistant',
+            content: '환불은 7일 이내 가능합니다.',
+            createdAt: '2026-08-28T01:00:01Z',
+          },
+        ],
+      });
+      // 평가는 답변이 놓인 턴 번호(1)로 돌아온다.
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 5,
+          comment: null,
+          createdAt: '2026-08-28T02:00:00Z',
+          updatedAt: '2026-08-28T02:00:00Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('평가한 세션'));
+      });
+
+      expect(aiApi.getSessionFeedback).toHaveBeenCalledWith('sess-1');
+      expect(screen.getByTestId('feedback-summary')).toHaveTextContent(
+        '정확도 4/5 · 유용성 5/5',
+      );
+    });
+
+    it('Given 세션의 답변을 평가할 때 When 제출하면 Then 세션 id 와 답변의 턴 번호가 함께 전송된다 (SPEC-024)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-1', title: '평가할 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-1',
+        title: '평가할 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValue({
+        sessionId: 'sess-1',
+        turnIndex: 1,
+        accuracy: 5,
+        helpfulness: 3,
+        comment: null,
+        createdAt: '2026-08-28T02:00:00Z',
+        updatedAt: '2026-08-28T02:00:00Z',
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('평가할 세션'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('이 답변을 평가하기'));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 3점/));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('평가 제출'));
+      });
+
+      expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+        sessionId: 'sess-1',
+        turnIndex: 1,
+        accuracy: 5,
+        helpfulness: 3,
+        comment: undefined,
+      });
     });
 
     it('Given 메타데이터가 없는 레거시 세션 데이터 When 세션을 복원하면 Then 에러 없이 텍스트가 렌더링되고 출처 목록은 빈 상태로 유지된다', async () => {
