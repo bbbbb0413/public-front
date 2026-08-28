@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { buildSendMessageRequest, decodeMessageBatch, DecodedMessage } from '../flatbuffers/chatUtils';
+import { GATEWAY_BASE_URL } from '../utils/gateway-url';
 
 interface HistoryMessage {
   messageId: string;
@@ -29,10 +30,8 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
   useEffect(() => {
     if (!token || !roomId) return;
 
-    const gatewayUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-    
     // /chat/ws 네임스페이스로 Socket.IO 클라이언트 생성
-    const socket = io(`${gatewayUrl}/chat/ws`, {
+    const socket = io(`${GATEWAY_BASE_URL}/chat/ws`, {
       transports: ['websocket'],
       auth: { token },
     });

@@ -1,7 +1,6 @@
 import client from './client';
 import { createIdempotencyKey } from '../utils/idempotency-key';
-
-const GATEWAY_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+import { GATEWAY_BASE_URL } from '../utils/gateway-url';
 
 const MAX_STREAM_RECONNECT_ATTEMPTS = 3;
 const STREAM_RECONNECT_BASE_DELAY_MS = 1000;

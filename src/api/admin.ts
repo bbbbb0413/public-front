@@ -1,8 +1,9 @@
 import axios from 'axios';
+import { GATEWAY_BASE_URL } from '../utils/gateway-url';
 
 // admin API는 gateway를 거쳐 admin-server(gRPC)로 프록시된다.
 const identityClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
+  baseURL: GATEWAY_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 

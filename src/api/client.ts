@@ -1,11 +1,8 @@
 import axios from 'axios';
-
-if (import.meta.env.PROD && !import.meta.env.VITE_API_BASE_URL) {
-  console.warn('[client] VITE_API_BASE_URL is not set — falling back to localhost:3000');
-}
+import { GATEWAY_BASE_URL } from '../utils/gateway-url';
 
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
+  baseURL: GATEWAY_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
