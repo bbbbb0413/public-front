@@ -15,6 +15,7 @@ vi.mock('../api/ai', () => {
     getSessionDetail: vi.fn(),
     deleteSessionById: vi.fn(),
     subscribeIngestJob: vi.fn(),
+    getDocumentFile: vi.fn(),
   };
 });
 
@@ -890,8 +891,126 @@ describe('AiService Component', () => {
 
       expect(screen.getByText('키보드로 펼친 스니펫 내용')).toBeInTheDocument();
     });
+  });
 
-    describe('AI 답변 클립보드 복사 기능', () => {
+  describe('출처 관련도 정렬 및 원문 보기 (SPEC-023)', () => {
+    it('Given 여러 출처가 서로 다른 관련도 점수를 가질 때 When 답변이 도착하면 Then 점수가 높은 순서대로 렌더링되고 각 항목에 관련도가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'low.pdf', chunkIndex: 0, documentId: 'd-low', score: 0.2 },
+        { fileName: 'high.pdf', chunkIndex: 0, documentId: 'd-high', score: 0.9 },
+        { fileName: 'mid.pdf', chunkIndex: 0, documentId: 'd-mid', score: 0.5 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('관련도 테스트 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '관련도 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByText('관련도 90%')).toBeInTheDocument();
+      expect(screen.getByText('관련도 50%')).toBeInTheDocument();
+      expect(screen.getByText('관련도 20%')).toBeInTheDocument();
+
+      const names = screen
+        .getAllByText(/\.pdf$/)
+        .map((el) => el.textContent);
+      expect(names).toEqual(['high.pdf', 'mid.pdf', 'low.pdf']);
+    });
+
+    it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 해당 문서의 원본 파일을 요청해 새 탭으로 연다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'view-me.pdf', chunkIndex: 0, documentId: 'd-view', score: 0.7, snippet: '보기 테스트' },
+      ];
+
+      const fakeBlob = new Blob(['원본 파일 내용'], { type: 'application/pdf' });
+      vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+      const createObjectURLMock = vi.fn().mockReturnValue('blob:fake-url');
+      const revokeObjectURLMock = vi.fn();
+      vi.stubGlobal('URL', {
+        ...URL,
+        createObjectURL: createObjectURLMock,
+        revokeObjectURL: revokeObjectURLMock,
+      });
+      const windowOpenMock = vi.fn();
+      vi.stubGlobal('open', windowOpenMock);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('원문 보기 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '원문 보기 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('d-view');
+      expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
+      expect(windowOpenMock).toHaveBeenCalledWith('blob:fake-url', '_blank', 'noopener,noreferrer');
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe('AI 답변 클립보드 복사 기능', () => {
       beforeEach(() => {
         vi.useFakeTimers();
       });
@@ -1152,9 +1271,9 @@ describe('AiService Component', () => {
         expect(copyBtn).toHaveTextContent('복사됨');
       });
     });
-  });
 
   describe('Done event metadata (SPEC-010)', () => {
+
     it('Given 프론트엔드가 done 이벤트로 { confidence: 0.9, missing: [] } 페이로드를 수신한 상황 When 스트리밍이 종료되고 답변 메시지가 렌더링될 때 Then AI 메시지 버블에 신뢰도 90% 뱃지가 올바르게 표시된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 

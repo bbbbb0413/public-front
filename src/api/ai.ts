@@ -216,6 +216,7 @@ export interface SourceRef {
   chunkIndex: number;
   documentId: string;
   snippet?: string;
+  score?: number;
 }
 
 export type AgentPhase = 'searching' | 'generating' | 'critiquing' | 'refining';
@@ -262,6 +263,14 @@ export const getSessionDetail = async (sessionId: string): Promise<SessionDetail
 
 export const deleteSessionById = async (sessionId: string): Promise<void> => {
   await client.delete(`/ai/rag/sessions/${sessionId}`);
+};
+
+/** 답변 근거로 인용된 문서의 원본 파일을 blob으로 받아온다. */
+export const getDocumentFile = async (documentId: string): Promise<Blob> => {
+  const response = await client.get(`/ai/knowledge/documents/${documentId}/file`, {
+    responseType: 'blob',
+  });
+  return response.data;
 };
 
 interface ConversationTurn {

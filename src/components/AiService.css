@@ -694,6 +694,36 @@
   margin-left: 2px;
 }
 
+.source-ref-score {
+  font-size: 10px;
+  color: #a5b4fc;
+  background: rgba(165, 180, 252, 0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.source-ref-view-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: #818cf8;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+
+.source-ref-view-btn:hover {
+  color: #a5b4fc;
+}
+
+.source-ref-view-btn:disabled {
+  color: #6b7280;
+  cursor: default;
+  text-decoration: none;
+}
+
 .source-ref-snippet {
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(99, 102, 241, 0.15);

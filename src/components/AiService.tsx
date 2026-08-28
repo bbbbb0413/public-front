@@ -11,6 +11,7 @@ import {
   getMyPrompt,
   saveMyPrompt,
   resetMyPrompt,
+  getDocumentFile,
   SourceRef,
   SessionOut,
   AgentProgress,
@@ -64,6 +65,7 @@ export const AiService = () => {
   const [loadingSessions, setLoadingSessions] = useState(false);
 
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
+  const [viewingFileId, setViewingFileId] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -117,6 +119,21 @@ export const AiService = () => {
       ...prev,
       [index]: !prev[index],
     }));
+  };
+
+  const handleViewSourceFile = async (documentId: string) => {
+    if (viewingFileId) return;
+    setViewingFileId(documentId);
+    try {
+      const blob = await getDocumentFile(documentId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      setErrorMsg('원본 파일을 불러오는 데 실패했습니다.');
+    } finally {
+      setViewingFileId(null);
+    }
   };
 
   const handleNewChat = () => {
@@ -731,7 +748,9 @@ export const AiService = () => {
                   <div className="source-refs">
                     <span className="source-refs-label">참고 문서</span>
                     <ul className="source-refs-list">
-                      {currentSources.map((src, i) => {
+                      {[...currentSources]
+                        .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity))
+                        .map((src, i) => {
                         const isExpanded = !!expandedSources[i];
                         return (
                           <li key={i} className="source-ref-item-container">
@@ -749,11 +768,24 @@ export const AiService = () => {
                             >
                               <span className="source-ref-name">{src.fileName}</span>
                               <span className="source-ref-chunk">청크 {src.chunkIndex}</span>
+                              {typeof src.score === 'number' && (
+                                <span className="source-ref-score">
+                                  관련도 {Math.round(src.score * 100)}%
+                                </span>
+                              )}
                               {src.snippet && (
                                 <span className="source-ref-toggle-icon" aria-hidden="true">
                                   {isExpanded ? '▲' : '▼'}
                                 </span>
                               )}
+                            </button>
+                            <button
+                              type="button"
+                              className="source-ref-view-btn"
+                              onClick={() => handleViewSourceFile(src.documentId)}
+                              disabled={viewingFileId === src.documentId}
+                            >
+                              {viewingFileId === src.documentId ? '불러오는 중…' : '원문 보기'}
                             </button>
                             {isExpanded && src.snippet && (
                               <div className="source-ref-snippet" data-testid={`source-snippet-${i}`}>
