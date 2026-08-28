@@ -66,6 +66,7 @@ export const AiService = () => {
 
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({});
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
+  const [fileViewError, setFileViewError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -124,13 +125,23 @@ export const AiService = () => {
   const handleViewSourceFile = async (documentId: string) => {
     if (viewingFileId) return;
     setViewingFileId(documentId);
+    setFileViewError(null);
+    // 팝업 차단 방지: await 이후 window.open을 호출하면 브라우저가 사용자 제스처와
+    // 무관한 호출로 간주해 팝업을 막는 경우가 많다. 클릭 핸들러 안에서 동기적으로
+    // 빈 탭을 먼저 열고, 파일을 받아온 뒤 그 탭의 location만 옮긴다.
+    const newTab = window.open('', '_blank');
     try {
       const blob = await getDocumentFile(documentId);
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      if (newTab) {
+        newTab.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
-      setErrorMsg('원본 파일을 불러오는 데 실패했습니다.');
+      newTab?.close();
+      setFileViewError('원본 파일을 불러오는 데 실패했습니다. 이 문서는 원본이 저장되어 있지 않을 수 있습니다.');
     } finally {
       setViewingFileId(null);
     }
@@ -796,6 +807,11 @@ export const AiService = () => {
                         );
                       })}
                     </ul>
+                    {fileViewError && (
+                      <div className="source-ref-file-error" role="alert">
+                        {fileViewError}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div ref={messagesEndRef} />

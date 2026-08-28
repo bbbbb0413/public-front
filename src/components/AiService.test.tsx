@@ -945,7 +945,7 @@ describe('AiService Component', () => {
       expect(names).toEqual(['high.pdf', 'mid.pdf', 'low.pdf']);
     });
 
-    it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 해당 문서의 원본 파일을 요청해 새 탭으로 연다', async () => {
+    it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 클릭 시점에 빈 탭을 먼저 열고 파일을 받아온 뒤 그 탭을 원본으로 이동시킨다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
       const mockSources: aiApi.SourceRef[] = [
@@ -962,7 +962,11 @@ describe('AiService Component', () => {
         createObjectURL: createObjectURLMock,
         revokeObjectURL: revokeObjectURLMock,
       });
-      const windowOpenMock = vi.fn();
+      // 팝업 차단 우회 트릭 검증용: window.open이 location.href를 설정할 수 있는
+      // 가짜 창 객체를 반환하도록 한다(await 이후 window.open을 다시 부르면
+      // 브라우저가 팝업으로 차단할 수 있어, 클릭 시점에 미리 연 탭을 재활용해야 한다).
+      const fakeTab = { location: { href: '' }, close: vi.fn() };
+      const windowOpenMock = vi.fn().mockReturnValue(fakeTab);
       vi.stubGlobal('open', windowOpenMock);
 
       vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
@@ -1002,9 +1006,66 @@ describe('AiService Component', () => {
         fireEvent.click(viewBtn);
       });
 
+      expect(windowOpenMock).toHaveBeenCalledWith('', '_blank');
       expect(aiApi.getDocumentFile).toHaveBeenCalledWith('d-view');
       expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
-      expect(windowOpenMock).toHaveBeenCalledWith('blob:fake-url', '_blank', 'noopener,noreferrer');
+      expect(fakeTab.location.href).toBe('blob:fake-url');
+
+      vi.unstubAllGlobals();
+    });
+
+    it('Given 원본이 저장되어 있지 않은 문서인 경우 When "원문 보기"를 누르면 Then 채팅 모달 내부에 실패 안내가 보이고 미리 열어둔 탭을 닫는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'missing.pdf', chunkIndex: 0, documentId: 'd-missing', score: 0.3 },
+      ];
+
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('404'));
+
+      const fakeTab = { location: { href: '' }, close: vi.fn() };
+      const windowOpenMock = vi.fn().mockReturnValue(fakeTab);
+      vi.stubGlobal('open', windowOpenMock);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('원문 없음 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '원문 없음 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      expect(fakeTab.close).toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다');
 
       vi.unstubAllGlobals();
     });
