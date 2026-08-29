@@ -739,12 +739,23 @@ export const AiService = () => {
                           >
                             {msg.text}
                           </ReactMarkdown>
-                          {msg.confidence !== undefined && (
-                            <div className="confidence-badge" data-testid="confidence-badge">
-                              <span className="confidence-label">신뢰도:</span>
-                              <span className="confidence-value">{Math.round(msg.confidence * 100)}%</span>
-                            </div>
-                          )}
+                          {msg.confidence !== undefined && (() => {
+                            const confLevel =
+                              msg.confidence >= 0.8
+                                ? 'confidence-high'
+                                : msg.confidence >= 0.6
+                                  ? 'confidence-medium'
+                                  : 'confidence-low';
+                            return (
+                              <div
+                                className={`confidence-badge ${confLevel}`}
+                                data-testid="confidence-badge"
+                              >
+                                <span className="confidence-label">신뢰도:</span>
+                                <span className="confidence-value">{Math.round(msg.confidence * 100)}%</span>
+                              </div>
+                            );
+                          })()}
                           {msg.missing && msg.missing.length > 0 && (
                             <div className="missing-info" data-testid="missing-info">
                               <span className="missing-label">확인하지 못한 항목:</span>

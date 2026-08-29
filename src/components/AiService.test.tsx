@@ -2504,5 +2504,202 @@ describe('AiService Component', () => {
       expect(contentCell?.querySelector('br')).toBeInTheDocument();
     });
   });
+
+  describe('신뢰도 수준별 배지 시각화 및 세션 복원', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given confidence가 80%(0.8) 이상일 때 When 렌더링되면 Then confidence-high 클래스가 적용된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-high', title: '높은 신뢰도 세션', updatedAt: '2026-08-29T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-high',
+        title: '높은 신뢰도 세션',
+        createdAt: '2026-08-29T01:00:00Z',
+        updatedAt: '2026-08-29T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '높은 신뢰도 답변입니다.',
+            createdAt: '2026-08-29T01:00:01Z',
+            confidence: 0.85,
+            missing: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('높은 신뢰도 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toHaveClass('confidence-badge');
+      expect(badge).toHaveClass('confidence-high');
+      expect(badge).toHaveTextContent('85%');
+    });
+
+    it('Given confidence가 60%(0.6) 이상 80%(0.8) 미만일 때 When 렌더링되면 Then confidence-medium 클래스가 적용된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-med', title: '중간 신뢰도 세션', updatedAt: '2026-08-29T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-med',
+        title: '중간 신뢰도 세션',
+        createdAt: '2026-08-29T01:00:00Z',
+        updatedAt: '2026-08-29T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '중간 신뢰도 답변입니다.',
+            createdAt: '2026-08-29T01:00:01Z',
+            confidence: 0.7,
+            missing: ['일부 누락 정보'],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('중간 신뢰도 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toHaveClass('confidence-badge');
+      expect(badge).toHaveClass('confidence-medium');
+      expect(badge).toHaveTextContent('70%');
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('일부 누락 정보')).toBeInTheDocument();
+    });
+
+    it('Given confidence가 60%(0.6) 미만일 때 When 렌더링되면 Then confidence-low 클래스가 적용된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-low', title: '낮은 신뢰도 세션', updatedAt: '2026-08-29T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-low',
+        title: '낮은 신뢰도 세션',
+        createdAt: '2026-08-29T01:00:00Z',
+        updatedAt: '2026-08-29T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '낮은 신뢰도 답변입니다.',
+            createdAt: '2026-08-29T01:00:01Z',
+            confidence: 0.45,
+            missing: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('낮은 신뢰도 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toHaveClass('confidence-badge');
+      expect(badge).toHaveClass('confidence-low');
+      expect(badge).toHaveTextContent('45%');
+    });
+
+    it('Given confidence 필드가 없는 레거시 세션 턴일 때 When 화면에 렌더링되면 Then 신뢰도 배지가 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-legacy', title: '레거시 세션', updatedAt: '2026-08-29T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-legacy',
+        title: '레거시 세션',
+        createdAt: '2026-08-29T01:00:00Z',
+        updatedAt: '2026-08-29T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '신뢰도가 없는 레거시 답변입니다.',
+            createdAt: '2026-08-29T01:00:01Z',
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('레거시 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.queryByTestId('confidence-badge')).not.toBeInTheDocument();
+      expect(screen.getAllByText('신뢰도가 없는 레거시 답변입니다.').length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
 

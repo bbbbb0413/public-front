@@ -868,6 +868,21 @@
   font-size: 0.75rem;
 }
 
+.confidence-badge.confidence-high {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.confidence-badge.confidence-medium {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.confidence-badge.confidence-low {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
 .confidence-label {
   color: rgba(255, 255, 255, 0.6);
   font-weight: 500;
@@ -876,6 +891,18 @@
 .confidence-value {
   color: #34d399;
   font-weight: 700;
+}
+
+.confidence-badge.confidence-high .confidence-value {
+  color: #34d399;
+}
+
+.confidence-badge.confidence-medium .confidence-value {
+  color: #fbbf24;
+}
+
+.confidence-badge.confidence-low .confidence-value {
+  color: #f87171;
 }
 
 .missing-info {
