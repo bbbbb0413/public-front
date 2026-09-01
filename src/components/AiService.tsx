@@ -9,6 +9,7 @@ import {
   deleteDocument,
   askQuestionStream,
   getSessions,
+  getSessionDetail,
   deleteSessionById,
   subscribeIngestJob,
   getMyPrompt,
@@ -34,6 +35,8 @@ interface DocumentInfo {
   status: string;
   chunkCount: number;
   createdAt: string;
+  step?: string;
+  progress?: number;
 }
 
 interface ChatMessage {
@@ -43,6 +46,13 @@ interface ChatMessage {
   missing?: string[];
 }
 
+const STEP_LABELS: Record<string, string> = {
+  extract: '텍스트 추출 중',
+  chunk: '청크 분할 중',
+  embed: '임베딩 생성 중',
+  index: '색인 저장 중',
+};
+
 const PHASE_LABELS: Record<AgentPhase, string> = {
   searching: '관련 문서를 찾는 중',
   generating: '답변을 생성하는 중',
@@ -50,10 +60,6 @@ const PHASE_LABELS: Record<AgentPhase, string> = {
   refining: '답변을 보완하고 다듬는 중',
 };
 
-// AI 답변에 표/개행이 마크다운 표(GFM)나 <br> 태그로 섞여 나올 때가 있어
-// remark-gfm(표 파싱)과 rehype-raw + rehype-sanitize(안전한 태그만 허용해 raw
-// HTML 렌더링)를 함께 사용한다. 두 상수 모두 매 렌더마다 새 배열을 만들지
-// 않도록 모듈 스코프에 둔다.
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
 
@@ -64,7 +70,9 @@ export const AiService = () => {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState('');
@@ -82,7 +90,6 @@ export const AiService = () => {
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
   const [fileViewError, setFileViewError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  // 턴 번호 -> 내 평가. 답변에 고유 id 가 없어 세션 안 위치로 찾는다.
   const [feedbackByTurn, setFeedbackByTurn] = useState<Record<number, AnswerFeedbackOut>>({});
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -94,6 +101,8 @@ export const AiService = () => {
   const [promptError, setPromptError] = useState('');
   const [promptSuccessMsg, setPromptSuccessMsg] = useState('');
 
+  const isMyCustomPrompt = Boolean(myPrompt?.userId);
+
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -101,12 +110,8 @@ export const AiService = () => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedIndex(index);
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = setTimeout(() => {
-        setCopiedIndex(null);
-      }, 2000);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopiedIndex(null), 2000);
     } catch {
       setErrorMsg('답변 복사에 실패했습니다.');
     }
@@ -123,9 +128,9 @@ export const AiService = () => {
     setLoadingSessions(true);
     try {
       const data = await getSessions(userId);
-      setSessions(data);
+      setSessions(data || []);
     } catch {
-      // 세션 목록 로드 실패는 조용히 처리
+      // 세션 목록 불러오기 실패는 주 기능에 치명적이지 않으므로 콘솔 로그만 남김
     } finally {
       setLoadingSessions(false);
     }
@@ -171,9 +176,6 @@ export const AiService = () => {
     if (viewingFileId) return;
     setViewingFileId(documentId);
     setFileViewError(null);
-    // 팝업 차단 방지: await 이후 window.open을 호출하면 브라우저가 사용자 제스처와
-    // 무관한 호출로 간주해 팝업을 막는 경우가 많다. 클릭 핸들러 안에서 동기적으로
-    // 빈 탭을 먼저 열고, 파일을 받아온 뒤 그 탭의 location만 옮긴다.
     const newTab = window.open('', '_blank');
     try {
       const blob = await getDocumentFile(documentId);
@@ -186,7 +188,7 @@ export const AiService = () => {
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch {
       newTab?.close();
-      setFileViewError('원본 파일을 불러오는 데 실패했습니다. 이 문서는 원본이 저장되어 있지 않을 수 있습니다.');
+      setFileViewError('원본 파일을 불러오는 데 실패했습니다.');
     } finally {
       setViewingFileId(null);
     }
@@ -204,15 +206,11 @@ export const AiService = () => {
     setFeedbackByTurn({});
   };
 
-  /** 이 세션에서 내가 남긴 평가를 불러와 턴 번호로 색인한다. */
   const loadFeedback = async (sid: string) => {
     try {
       const items = await getSessionFeedback(sid);
-      setFeedbackByTurn(
-        Object.fromEntries(items.map((f) => [f.turnIndex, f])),
-      );
+      setFeedbackByTurn(Object.fromEntries(items.map((f) => [f.turnIndex, f])));
     } catch {
-      // 평가는 부수 정보다. 못 불러와도 대화 자체는 열려야 한다.
       setFeedbackByTurn({});
     }
   };
@@ -228,7 +226,6 @@ export const AiService = () => {
 
   const handleLoadSession = async (sid: string) => {
     try {
-      const { getSessionDetail } = await import('../api/ai');
       const detail = await getSessionDetail(sid);
       if (!detail) return;
       setSessionId(detail.sessionId);
@@ -259,9 +256,7 @@ export const AiService = () => {
     try {
       await deleteSessionById(sid);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sid));
-      if (sessionId === sid) {
-        handleNewChat();
-      }
+      if (sessionId === sid) handleNewChat();
     } catch {
       setErrorMsg('세션 삭제에 실패했습니다.');
     }
@@ -311,34 +306,19 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isChatOpen]);
 
-  useEffect(() => {
-    if (!deletingDoc) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isDeleting) {
-        setDeletingDoc(null);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [deletingDoc, isDeleting]);
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 1차 클라이언트 사이드 유효성 검사
-    // 1. 파일 크기 검증 (최대 10MB)
-    const MAX_SIZE = 10 * 1024 * 1024;
+    const MAX_SIZE = 50 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
-      setErrorMsg('파일 크기는 최대 10MB까지 허용됩니다.');
+      setErrorMsg('파일 크기는 최대 50MB까지 허용됩니다.');
       e.target.value = '';
       return;
     }
 
-    // 2. 지원 파일 형식 검증 (.txt, .pdf, .md)
     const allowedExtensions = ['txt', 'pdf', 'md'];
-    const fileName = file.name || '';
-    const ext = fileName.split('.').pop()?.toLowerCase();
+    const ext = file.name.split('.').pop()?.toLowerCase();
     if (!ext || !allowedExtensions.includes(ext)) {
       setErrorMsg('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)');
       e.target.value = '';
@@ -346,11 +326,13 @@ export const AiService = () => {
     }
 
     setUploading(true);
+    setUploadProgressText('');
     setErrorMsg('');
     try {
       const res = await uploadDocument(file);
       const jobId = res?.jobId;
       if (!jobId) {
+        setUploading(false);
         await fetchDocuments();
         return;
       }
@@ -368,6 +350,8 @@ export const AiService = () => {
           cleanupFn();
           cleanupFn = null;
         }
+        setUploadProgressText('');
+        setUploading(false);
       };
 
       timeoutTimer = setTimeout(() => {
@@ -376,6 +360,13 @@ export const AiService = () => {
       }, 15000);
 
       cleanupFn = subscribeIngestJob(jobId, {
+        onProgress: (data) => {
+          if (data.step || data.progress !== undefined) {
+            const stepLabel = (data.step && STEP_LABELS[data.step]) || data.step || '처리 중';
+            const percentText = data.progress !== undefined ? ` (${data.progress}%)` : '';
+            setUploadProgressText(`${stepLabel}${percentText}`);
+          }
+        },
         onDone: () => {
           finishSubscription();
           fetchDocuments();
@@ -386,18 +377,31 @@ export const AiService = () => {
         },
       });
 
-      if (cleanupFn) {
-        activeSubscriptionsRef.current.add(cleanupFn);
-      }
+      if (cleanupFn) activeSubscriptionsRef.current.add(cleanupFn);
     } catch (error) {
       const err = error as { response?: { data?: { message?: unknown } } };
       const serverMessage = err.response?.data?.message;
       setErrorMsg(typeof serverMessage === 'string' ? serverMessage : '파일 업로드에 실패했습니다.');
-    } finally {
       setUploading(false);
+    } finally {
       e.target.value = '';
     }
   };
+
+  const handleRetryUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  useEffect(() => {
+    if (!deletingDoc) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDeleting) {
+        setDeletingDoc(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deletingDoc, isDeleting]);
 
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
@@ -427,15 +431,15 @@ export const AiService = () => {
 
   const handleOpenPromptSettings = async () => {
     setIsPromptSettingsOpen(true);
-    setPromptLoading(true);
     setPromptError('');
     setPromptSuccessMsg('');
+    setPromptLoading(true);
     try {
-      const prompt = await getMyPrompt();
-      setMyPrompt(prompt);
-      setPromptDraft(prompt.content);
+      const p = await getMyPrompt();
+      setMyPrompt(p);
+      setPromptDraft(p.content);
     } catch {
-      setPromptError('프롬프트를 불러오지 못했습니다.');
+      setPromptError('프롬프트를 불러오는 데 실패했습니다.');
     } finally {
       setPromptLoading(false);
     }
@@ -443,16 +447,17 @@ export const AiService = () => {
 
   const handleSavePrompt = async () => {
     if (!promptDraft.trim()) {
-      setPromptError('프롬프트 내용을 입력해주세요.');
+      setPromptError('프롬프트 내용을 입력하세요.');
       return;
     }
     setPromptSaving(true);
     setPromptError('');
     setPromptSuccessMsg('');
     try {
-      const saved = await saveMyPrompt(promptDraft);
+      const saved = await saveMyPrompt(promptDraft.trim());
       setMyPrompt(saved);
-      setPromptSuccessMsg('내 시스템 프롬프트가 저장되어 즉시 적용되었습니다.');
+      setPromptDraft(saved.content);
+      setPromptSuccessMsg('프롬프트가 저장되었습니다.');
     } catch {
       setPromptError('프롬프트 저장에 실패했습니다.');
     } finally {
@@ -466,32 +471,29 @@ export const AiService = () => {
     setPromptSuccessMsg('');
     try {
       await resetMyPrompt();
-      const prompt = await getMyPrompt();
-      setMyPrompt(prompt);
-      setPromptDraft(prompt.content);
+      const defaultPrompt = await getMyPrompt();
+      setMyPrompt(defaultPrompt);
+      setPromptDraft(defaultPrompt.content);
       setPromptSuccessMsg('기본 프롬프트로 초기화되었습니다.');
     } catch {
-      setPromptError('초기화에 실패했습니다.');
+      setPromptError('프롬프트 초기화에 실패했습니다.');
     } finally {
       setPromptSaving(false);
     }
   };
 
-  const isMyCustomPrompt = !!(myPrompt && userId && myPrompt.userId === userId);
-
   const handleCancelStreaming = async () => {
+    const canceledText = streamingAnswerRef.current || streamingAnswer;
     if (activeStreamCancelRef.current) {
       await activeStreamCancelRef.current();
       activeStreamCancelRef.current = null;
     }
-
-    const currentText = streamingAnswerRef.current;
-    if (currentText) {
+    if (canceledText) {
       setChatLog((prev) => [
         ...prev,
         {
           sender: 'ai',
-          text: currentText,
+          text: canceledText,
         },
       ]);
     }
@@ -528,19 +530,9 @@ export const AiService = () => {
       },
       (finalMeta) => {
         activeStreamCancelRef.current = null;
-        const confidence =
-          finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
-        const missing =
-          finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [
-          ...prev,
-          {
-            sender: 'ai',
-            text: accumulated,
-            confidence,
-            missing,
-          },
-        ]);
+        const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
+        const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
+        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
@@ -550,6 +542,7 @@ export const AiService = () => {
       () => {
         activeStreamCancelRef.current = null;
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
+        setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
         setIsStreaming(false);
@@ -576,16 +569,16 @@ export const AiService = () => {
       {errorMsg && <div className="error-banner">{errorMsg}</div>}
 
       <div className="ai-layout">
-        {/* 지식베이스 관리 영역 */}
         <div className="kb-section glass-panel">
           <div className="kb-header">
             <h4>문서 관리</h4>
             <div className="file-upload-wrapper">
               <label htmlFor="file-upload" className={`upload-btn${uploading ? ' uploading' : ''}`}>
-                {uploading ? '업로드 중...' : '문서 업로드'}
+                {uploading ? (uploadProgressText || '업로드 중...') : '문서 업로드'}
               </label>
               <input
                 id="file-upload"
+                ref={fileInputRef}
                 aria-label="file-upload-input"
                 type="file"
                 accept=".txt,.pdf,.md,application/pdf"
@@ -593,7 +586,7 @@ export const AiService = () => {
                 disabled={uploading}
                 style={{ display: 'none' }}
               />
-              <span className="upload-hint">TXT · PDF</span>
+              <span className="upload-hint">TXT · PDF · MD (최대 50MB)</span>
             </div>
           </div>
 
@@ -613,27 +606,41 @@ export const AiService = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map((doc) => (
-                    <tr key={doc.id}>
-                      <td className="doc-name">{doc.fileName}</td>
-                      <td>
-                        <span className={`status-badge ${doc.status}`}>{doc.status}</span>
-                      </td>
-                      <td>{doc.chunkCount}</td>
-                      <td>
-                        <button onClick={() => handleDeleteClick(doc)} className="btn-delete">
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {documents.map((doc) => {
+                    const isProcessing = doc.status === 'processing' || doc.status === 'pending' || doc.status === 'queued';
+                    const isFailed = doc.status === 'failed' || doc.status === 'error';
+                    const stepLabel = doc.step ? (STEP_LABELS[doc.step] || doc.step) : null;
+                    const progressText = doc.progress !== undefined ? `${doc.progress}%` : null;
+
+                    let statusContent = doc.status;
+                    if (isProcessing && (stepLabel || progressText)) {
+                      statusContent = [stepLabel, progressText].filter(Boolean).join(' ');
+                    }
+
+                    return (
+                      <tr key={doc.id}>
+                        <td className="doc-name">{doc.fileName}</td>
+                        <td>
+                          <span className={`status-badge ${doc.status}`}>{statusContent}</span>
+                        </td>
+                        <td>{doc.chunkCount}</td>
+                        <td>
+                          <div className="doc-actions">
+                            {isFailed && (
+                              <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
+                            )}
+                            <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
           </div>
         </div>
 
-        {/* Q&A 미리보기 패널 */}
         <div className="qa-section glass-panel">
           <div className="qa-section-header">
             <h4>문서 기반 AI Q&A</h4>
@@ -668,9 +675,7 @@ export const AiService = () => {
                   <div className="qa-preview-last-msg">
                     <span className="qa-preview-label">마지막 AI 답변</span>
                     <span className="qa-preview-text">
-                      {lastAiMsg.text.length > 100
-                        ? lastAiMsg.text.slice(0, 100) + '…'
-                        : lastAiMsg.text}
+                      {lastAiMsg.text.length > 100 ? lastAiMsg.text.slice(0, 100) + '…' : lastAiMsg.text}
                     </span>
                   </div>
                 )}
@@ -683,7 +688,6 @@ export const AiService = () => {
         </div>
       </div>
 
-      {/* 풀스크린 채팅 모달 */}
       {isChatOpen && (
         <div
           className="chat-modal-overlay"

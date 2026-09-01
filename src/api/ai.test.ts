@@ -165,6 +165,41 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(typeof unsubscribe).toBe('function');
   });
 
+  it('subscribeIngestJob should invoke onProgress when progress event is received', async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onProgress = vi.fn();
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"progress","data":{"step":"extract","progress":25}}\n\n',
+      'id: 2\ndata: {"type":"done","data":{"documentId":"doc-1"}}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      body: stream,
+      headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    subscribeIngestJob('job-ingest-progress', { onDone, onError, onProgress });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onProgress).toHaveBeenCalledWith({ step: 'extract', progress: 25 });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribeIngestJob should invoke onError when error event is received with object payload', async () => {
     const onDone = vi.fn();
     const onError = vi.fn();

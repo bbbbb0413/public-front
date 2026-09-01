@@ -162,10 +162,41 @@
   border: 1px solid hsla(150, 80%, 40%, 0.3);
 }
 
-.status-badge.processing {
+.status-badge.processing,
+.status-badge.pending,
+.status-badge.queued {
   background: hsla(45, 80%, 40%, 0.2);
   color: hsl(45, 80%, 60%);
   border: 1px solid hsla(45, 80%, 50%, 0.3);
+}
+
+.status-badge.failed,
+.status-badge.error {
+  background: hsla(350, 80%, 40%, 0.2);
+  color: hsl(350, 90%, 75%);
+  border: 1px solid hsla(350, 80%, 50%, 0.3);
+}
+
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-retry {
+  background: hsla(210, 80%, 50%, 0.15);
+  border: 1px solid hsla(210, 80%, 60%, 0.3);
+  color: hsl(210, 90%, 75%);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.btn-retry:hover {
+  background: hsla(210, 80%, 50%, 0.25);
+  border-color: hsl(210, 90%, 70%);
 }
 
 .btn-delete {
@@ -175,6 +206,7 @@
   padding: 0.3rem 0.6rem;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 0.8rem;
   transition: all 0.2s;
 }
 
