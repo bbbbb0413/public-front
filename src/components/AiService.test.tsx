@@ -148,14 +148,14 @@ describe('AiService Component', () => {
     expect(answerContainer.textContent).toContain('안녕하세요');
   });
 
-  it('blocks uploading files larger than 10MB', async () => {
+  it('blocks uploading files larger than 50MB', async () => {
     vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
     await act(async () => {
       render(<AiService />);
     });
 
-    const file = new File([new ArrayBuffer(11 * 1024 * 1024)], 'test.pdf', { type: 'application/pdf' });
+    const file = new File([new ArrayBuffer(51 * 1024 * 1024)], 'test.pdf', { type: 'application/pdf' });
     const fileInput = screen.getByLabelText('file-upload-input');
 
     await act(async () => {
@@ -163,7 +163,7 @@ describe('AiService Component', () => {
     });
 
     expect(aiApi.uploadDocument).not.toHaveBeenCalled();
-    expect(screen.getByText('파일 크기는 최대 10MB까지 허용됩니다.')).toBeInTheDocument();
+    expect(screen.getByText('파일 크기는 최대 50MB까지 허용됩니다.')).toBeInTheDocument();
   });
 
   it('blocks uploading unsupported file types', async () => {
@@ -189,7 +189,7 @@ describe('AiService Component', () => {
     const errorResponse = {
       response: {
         data: {
-          message: '파일 크기가 10MB 제한을 초과했습니다.',
+          message: '파일 크기가 50MB 제한을 초과했습니다.',
         },
       },
     };
@@ -207,7 +207,7 @@ describe('AiService Component', () => {
     });
 
     expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
-    expect(screen.getByText('파일 크기가 10MB 제한을 초과했습니다.')).toBeInTheDocument();
+    expect(screen.getByText('파일 크기가 50MB 제한을 초과했습니다.')).toBeInTheDocument();
   });
 
   it('displays default error message if server message is not present', async () => {
@@ -246,7 +246,7 @@ describe('AiService Component', () => {
 
     expect(aiApi.uploadDocument).toHaveBeenCalledWith(file);
     // 5MB txt 파일 업로드 시 에러가 노출되지 않음을 단언
-    expect(screen.queryByText('파일 크기는 최대 10MB까지 허용됩니다.')).not.toBeInTheDocument();
+    expect(screen.queryByText('파일 크기는 최대 50MB까지 허용됩니다.')).not.toBeInTheDocument();
     expect(screen.queryByText('지원하지 않는 파일 형식입니다. (TXT, PDF, MD 파일만 지원)')).not.toBeInTheDocument();
     expect(screen.queryByText('파일 업로드에 실패했습니다.')).not.toBeInTheDocument();
   });
@@ -2813,6 +2813,102 @@ describe('AiService Component', () => {
 
       expect(screen.queryByTestId('confidence-badge')).not.toBeInTheDocument();
       expect(screen.getAllByText('신뢰도가 없는 레거시 답변입니다.').length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Document Ingest Step Progress & Retry (SPEC-025)', () => {
+    it('Given 문서 상태가 processing이고 step과 progress가 있을 때 When 문서 목록이 렌더링되면 Then 단계 라벨과 진행률 퍼센트가 상태 배지에 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-step-1',
+          fileName: 'ai-paper.pdf',
+          status: 'processing',
+          step: 'embed',
+          progress: 65,
+          chunkCount: 12,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('ai-paper.pdf')).toBeInTheDocument();
+      expect(screen.getByText('임베딩 생성 중 65%')).toBeInTheDocument();
+    });
+
+    it('Given 문서 상태가 failed일 때 When 문서 목록이 렌더링되면 Then 재시도 버튼이 노출되고 클릭 시 파일 업로드 창이 트리거된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      expect(retryBtn).toBeInTheDocument();
+
+      const fileInput = screen.getByLabelText('file-upload-input');
+      const clickSpy = vi.spyOn(fileInput, 'click');
+
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('Given 업로드 진행 중 SSE progress 이벤트가 수신될 때 When 진행률이 수신되면 Then 업로드 버튼 텍스트가 단계명 및 진행률로 갱신된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-step-progress' });
+
+      let capturedCallbacks: {
+        onDone?: () => void;
+        onError?: (error: string) => void;
+        onProgress?: (data: { step?: string; progress?: number }) => void;
+      } = {};
+      const mockClose = vi.fn();
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation((_jobId, callbacks) => {
+        capturedCallbacks = callbacks;
+        return mockClose;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const file = new File(['test data'], 'test.pdf', { type: 'application/pdf' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      expect(screen.getByText('업로드 중...')).toBeInTheDocument();
+
+      // progress 이벤트 수신 시뮬레이션
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'chunk', progress: 40 });
+      });
+
+      expect(screen.getByText('청크 분할 중 (40%)')).toBeInTheDocument();
+
+      // done 이벤트 발생
+      await act(async () => {
+        capturedCallbacks.onDone?.();
+      });
+
+      expect(screen.getByText('문서 업로드')).toBeInTheDocument();
     });
   });
 });

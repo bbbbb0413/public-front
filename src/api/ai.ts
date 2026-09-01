@@ -112,8 +112,16 @@ const connectJobStream = async (
   }
 };
 
-export const getDocuments = async () => {
-  const response = await client.get('/ai/knowledge/documents');
+export interface DocumentItem {
+  id: string;
+  fileName: string;
+  status: string;
+  chunkCount: number;
+  createdAt: string;
+}
+
+export const getDocuments = async (): Promise<DocumentItem[]> => {
+  const response = await client.get<DocumentItem[]>('/ai/knowledge/documents');
   return response.data;
 };
 
@@ -132,9 +140,19 @@ export const uploadDocument = async (file: File): Promise<UploadDocumentResponse
   return response.data;
 };
 
+export interface IngestProgressEvent {
+  step?: 'extract' | 'chunk' | 'embed' | 'index' | string;
+  progress?: number;
+  [key: string]: unknown;
+}
+
 export const subscribeIngestJob = (
   jobId: string,
-  callbacks: { onDone?: () => void; onError?: (error: string) => void },
+  callbacks: {
+    onDone?: () => void;
+    onError?: (error: string) => void;
+    onProgress?: (data: IngestProgressEvent) => void;
+  },
 ): (() => void) => {
   const controller = new AbortController();
   let isClosed = false;
@@ -146,7 +164,12 @@ export const subscribeIngestJob = (
   };
 
   const handleEvent = (event: ParsedSseEvent): boolean => {
-    if (event.type === 'done') {
+    if (event.type === 'progress') {
+      if (event.data && typeof event.data === 'object') {
+        callbacks.onProgress?.(event.data as IngestProgressEvent);
+      }
+      return false;
+    } else if (event.type === 'done') {
       close();
       callbacks.onDone?.();
       return true;
