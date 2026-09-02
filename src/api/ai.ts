@@ -224,13 +224,34 @@ export const getMyPrompt = async (): Promise<MyPromptOut> => {
   return response.data;
 };
 
-export const saveMyPrompt = async (content: string): Promise<MyPromptOut> => {
-  const response = await client.post('/ai/my-prompt', { content });
+export const getMyPromptList = async (): Promise<MyPromptOut[]> => {
+  const response = await client.get('/ai/my-prompt/list');
+  return response.data ?? [];
+};
+
+export const saveMyPrompt = async (
+  content: string,
+  activate?: boolean,
+): Promise<MyPromptOut> => {
+  const body: { content: string; activate?: boolean } = { content };
+  if (activate !== undefined) {
+    body.activate = activate;
+  }
+  const response = await client.post('/ai/my-prompt', body);
+  return response.data;
+};
+
+export const activateMyPrompt = async (version: number): Promise<MyPromptOut> => {
+  const response = await client.patch(`/ai/my-prompt/${version}/activate`);
   return response.data;
 };
 
 export const resetMyPrompt = async (): Promise<void> => {
   await client.delete('/ai/my-prompt');
+};
+
+export const deleteMyPromptVersion = async (version: number): Promise<void> => {
+  await client.delete(`/ai/my-prompt/${version}`);
 };
 
 export interface SourceRef {

@@ -10,6 +10,7 @@ vi.mock('axios', () => ({
     },
     post: vi.fn(),
     get: vi.fn(),
+    patch: vi.fn(),
     delete: vi.fn(),
   },
 }));
@@ -23,11 +24,18 @@ import {
   getSessionDetail,
   deleteSessionById,
   subscribeIngestJob,
+  getMyPrompt,
+  getMyPromptList,
+  saveMyPrompt,
+  activateMyPrompt,
+  resetMyPrompt,
+  deleteMyPromptVersion,
 } from './ai';
 
 const mockAxios = axios as unknown as {
   post: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
+  patch: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
 };
 
@@ -735,4 +743,84 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onDone).toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
+
+  describe('Personal Prompt Management API (SPEC-026)', () => {
+    it('getMyPromptList should fetch prompt list via GET /ai/my-prompt/list', async () => {
+      const mockList = [
+        { id: '1', name: 'rag-qa-system', version: 2, content: '프롬프트 2', isActive: true, userId: 'user-1', createdAt: '2026-09-03' },
+        { id: '2', name: 'rag-qa-system', version: 1, content: '프롬프트 1', isActive: false, userId: 'user-1', createdAt: '2026-09-02' },
+      ];
+      mockAxios.get.mockResolvedValueOnce({ data: mockList });
+
+      const result = await getMyPromptList();
+      expect(mockAxios.get).toHaveBeenCalledWith('/ai/my-prompt/list');
+      expect(result).toEqual(mockList);
+    });
+
+    it('saveMyPrompt should send content and activate option via POST /ai/my-prompt', async () => {
+      const mockCreated = {
+        id: '1',
+        name: 'rag-qa-system',
+        version: 1,
+        content: '새 프롬프트',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-03',
+      };
+      mockAxios.post.mockResolvedValueOnce({ data: mockCreated });
+
+      const result = await saveMyPrompt('새 프롬프트', true);
+      expect(mockAxios.post).toHaveBeenCalledWith('/ai/my-prompt', { content: '새 프롬프트', activate: true });
+      expect(result).toEqual(mockCreated);
+    });
+
+    it('activateMyPrompt should activate a specific version via PATCH /ai/my-prompt/:version/activate', async () => {
+      const mockActivated = {
+        id: '1',
+        name: 'rag-qa-system',
+        version: 3,
+        content: '프롬프트 3',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-03',
+      };
+      mockAxios.patch = vi.fn().mockResolvedValueOnce({ data: mockActivated });
+
+      const result = await activateMyPrompt(3);
+      expect(mockAxios.patch).toHaveBeenCalledWith('/ai/my-prompt/3/activate');
+      expect(result).toEqual(mockActivated);
+    });
+
+    it('getMyPrompt should fetch active prompt via GET /ai/my-prompt', async () => {
+      const mockPrompt = {
+        id: '1',
+        name: 'rag-qa-system',
+        version: 1,
+        content: '기본 프롬프트',
+        isActive: true,
+        userId: null,
+        createdAt: '2026-09-03',
+      };
+      mockAxios.get.mockResolvedValueOnce({ data: mockPrompt });
+
+      const result = await getMyPrompt();
+      expect(mockAxios.get).toHaveBeenCalledWith('/ai/my-prompt');
+      expect(result).toEqual(mockPrompt);
+    });
+
+    it('resetMyPrompt should reset active prompt via DELETE /ai/my-prompt', async () => {
+      mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+
+      await resetMyPrompt();
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/my-prompt');
+    });
+
+    it('deleteMyPromptVersion should delete a specific version via DELETE /ai/my-prompt/:version', async () => {
+      mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+
+      await deleteMyPromptVersion(2);
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/my-prompt/2');
+    });
+  });
 });
+
