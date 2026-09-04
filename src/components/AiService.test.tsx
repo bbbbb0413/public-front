@@ -3142,5 +3142,73 @@ describe('AiService Component', () => {
       expect(screen.getByText(/최대 10개까지 저장할 수 있습니다/i)).toBeInTheDocument();
     });
   });
+
+  describe('SPEC-028: AI 작업 허브 화면 및 작업 상태 요약 대시보드', () => {
+    it('Given AI 작업 허브에 진입했을 때 When 문항 및 작업 상태가 주어지면 Then 허브 헤더와 각 상태별 요약 메트릭이 렌더링된다', async () => {
+      const mockDocs = [
+        { id: 'doc-1', fileName: 'guide.txt', status: 'processed', chunkCount: 3, createdAt: '2026-06-18T05:00:00Z' },
+        { id: 'doc-2', fileName: 'processing.pdf', status: 'processing', chunkCount: 0, createdAt: '2026-06-18T05:01:00Z' },
+        { id: 'doc-3', fileName: 'failed.md', status: 'failed', chunkCount: 0, createdAt: '2026-06-18T05:02:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('AI 작업 허브')).toBeInTheDocument();
+      expect(screen.getByTestId('ai-hub-dashboard')).toBeInTheDocument();
+
+      // 메트릭 확인
+      const docMetric = screen.getByTestId('metric-docs');
+      expect(docMetric).toHaveTextContent('1'); // processed: 1
+
+      const processingMetric = screen.getByTestId('metric-processing');
+      expect(processingMetric).toHaveTextContent('1'); // processing: 1
+
+      const failedMetric = screen.getByTestId('metric-failed');
+      expect(failedMetric).toHaveTextContent('1'); // failed: 1
+    });
+
+    it('Given 허브 대시보드의 빠른 진입 버튼들 When 사용자가 클릭하면 Then 해당 모달이나 동작이 정상 트리거된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValue({
+        id: null,
+        name: 'rag-qa-system',
+        version: 0,
+        content: '기본 시스템 프롬프트',
+        isActive: false,
+        userId: null,
+        createdAt: '2026-09-01T00:00:00Z',
+      });
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValue([]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      // 새 질문 시작 버튼 클릭 -> 채팅 모달 열림
+      const startQuestionBtn = screen.getByRole('button', { name: /새 질문 시작/i });
+      await act(async () => {
+        fireEvent.click(startQuestionBtn);
+      });
+      expect(screen.getByRole('dialog', { name: /문서 기반 AI Q&A/i })).toBeInTheDocument();
+
+      // 채팅 닫기
+      const closeChatBtn = screen.getByRole('button', { name: /채팅 닫기/i });
+      await act(async () => {
+        fireEvent.click(closeChatBtn);
+      });
+      expect(screen.queryByRole('dialog', { name: /문서 기반 AI Q&A/i })).not.toBeInTheDocument();
+
+      // 허브의 프롬프트 설정 버튼 클릭 -> 프롬프트 설정 모달 열림
+      const promptSettingBtn = screen.getByRole('button', { name: /프롬프트 설정 ⚙/i });
+      await act(async () => {
+        fireEvent.click(promptSettingBtn);
+      });
+      expect(screen.getByText('AI 답변 스타일 설정')).toBeInTheDocument();
+    });
+  });
 });
+
 
