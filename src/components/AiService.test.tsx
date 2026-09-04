@@ -18,6 +18,12 @@ vi.mock('../api/ai', () => {
     getDocumentFile: vi.fn(),
     submitAnswerFeedback: vi.fn(),
     getSessionFeedback: vi.fn().mockResolvedValue([]),
+    getMyPrompt: vi.fn(),
+    getMyPromptList: vi.fn(),
+    saveMyPrompt: vi.fn(),
+    activateMyPrompt: vi.fn(),
+    resetMyPrompt: vi.fn(),
+    deleteMyPromptVersion: vi.fn(),
   };
 });
 
@@ -2909,6 +2915,231 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getByText('문서 업로드')).toBeInTheDocument();
+    });
+  });
+
+  describe('Personal Prompt Management (SPEC-026)', () => {
+    it('Given AI 설정 모달을 열었을 때 When 활성 프롬프트와 목록을 불러오면 Then 활성 프롬프트와 저장된 슬롯 목록(최대 10개)이 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockActivePrompt: aiApi.MyPromptOut = {
+        id: 'p-1',
+        name: 'rag-qa-system',
+        version: 2,
+        content: '활성화된 프롬프트 내용',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-02T00:00:00Z',
+      };
+      const mockPromptList: aiApi.MyPromptOut[] = [
+        mockActivePrompt,
+        {
+          id: 'p-2',
+          name: 'rag-qa-system',
+          version: 1,
+          content: '첫 번째 비활성 프롬프트 내용',
+          isActive: false,
+          userId: 'user-1',
+          createdAt: '2026-09-01T00:00:00Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(mockActivePrompt);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce(mockPromptList);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const settingBtn = screen.getByRole('button', { name: /AI 설정/i });
+      await act(async () => {
+        fireEvent.click(settingBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /AI 답변 스타일 설정/i })).toBeInTheDocument();
+      expect(aiApi.getMyPrompt).toHaveBeenCalled();
+      expect(aiApi.getMyPromptList).toHaveBeenCalled();
+
+      expect(screen.getByText('내 커스텀 설정 사용 중')).toBeInTheDocument();
+      expect(screen.getByText('저장된 프롬프트 목록 (2 / 10)')).toBeInTheDocument();
+      expect(screen.getByText('슬롯 1 (v2)')).toBeInTheDocument();
+      expect(screen.getByText('슬롯 2 (v1)')).toBeInTheDocument();
+      expect(screen.getByText('활성')).toBeInTheDocument();
+    }, 15000);
+
+    it('Given 목록에서 비활성 슬롯이 있을 때 When 활성화 버튼을 누르면 Then 해당 버전이 활성화되고 목록 및 활성 프롬프트가 갱신된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const prompt1: aiApi.MyPromptOut = {
+        id: 'p-1',
+        name: 'rag-qa-system',
+        version: 1,
+        content: '프롬프트 v1',
+        isActive: false,
+        userId: 'user-1',
+        createdAt: '2026-09-01T00:00:00Z',
+      };
+      const prompt2: aiApi.MyPromptOut = {
+        id: 'p-2',
+        name: 'rag-qa-system',
+        version: 2,
+        content: '프롬프트 v2',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-02T00:00:00Z',
+      };
+
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(prompt2);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([prompt2, prompt1]);
+
+      const activatedV1: aiApi.MyPromptOut = { ...prompt1, isActive: true };
+      vi.mocked(aiApi.activateMyPrompt).mockResolvedValueOnce(activatedV1);
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(activatedV1);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([{ ...prompt2, isActive: false }, activatedV1]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const settingBtn = screen.getByRole('button', { name: /AI 설정/i });
+      await act(async () => {
+        fireEvent.click(settingBtn);
+      });
+
+      const activateBtn = screen.getByRole('button', { name: /v1 활성화/i });
+      await act(async () => {
+        fireEvent.click(activateBtn);
+      });
+
+      expect(aiApi.activateMyPrompt).toHaveBeenCalledWith(1);
+      expect(screen.getByText('프롬프트가 활성화되었습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 새 프롬프트를 작성하고 저장할 때 When 저장이 성공하면 Then 목록에 새 슬롯이 추가된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const initialPrompt: aiApi.MyPromptOut = {
+        id: null,
+        name: 'rag-qa-system',
+        version: 0,
+        content: '기본 시스템 프롬프트',
+        isActive: false,
+        userId: null,
+        createdAt: '2026-09-01T00:00:00Z',
+      };
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(initialPrompt);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([]);
+
+      const createdPrompt: aiApi.MyPromptOut = {
+        id: 'p-new',
+        name: 'rag-qa-system',
+        version: 1,
+        content: '내가 새로 작성한 프롬프트',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-03T00:00:00Z',
+      };
+      vi.mocked(aiApi.saveMyPrompt).mockResolvedValueOnce(createdPrompt);
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(createdPrompt);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([createdPrompt]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const settingBtn = screen.getByRole('button', { name: /AI 설정/i });
+      await act(async () => {
+        fireEvent.click(settingBtn);
+      });
+
+      const textarea = screen.getByRole('textbox');
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value: '내가 새로 작성한 프롬프트' } });
+      });
+
+      const saveBtn = screen.getByRole('button', { name: /새 슬롯으로 저장 및 적용/i });
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+
+      expect(aiApi.saveMyPrompt).toHaveBeenCalledWith('내가 새로 작성한 프롬프트', true);
+      expect(screen.getByText('새 프롬프트 슬롯이 저장되고 활성화되었습니다.')).toBeInTheDocument();
+      expect(screen.getByText('저장된 프롬프트 목록 (1 / 10)')).toBeInTheDocument();
+    });
+
+    it('Given 특정 슬롯의 삭제 버튼을 클릭할 때 When 삭제가 성공하면 Then 목록에서 제거되고 활성 슬롯이었던 경우 기본값으로 갱신된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const activePrompt: aiApi.MyPromptOut = {
+        id: 'p-1',
+        name: 'rag-qa-system',
+        version: 1,
+        content: '삭제될 활성 프롬프트',
+        isActive: true,
+        userId: 'user-1',
+        createdAt: '2026-09-01T00:00:00Z',
+      };
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(activePrompt);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([activePrompt]);
+
+      vi.mocked(aiApi.deleteMyPromptVersion).mockResolvedValueOnce(undefined);
+
+      const defaultPrompt: aiApi.MyPromptOut = {
+        id: null,
+        name: 'rag-qa-system',
+        version: 0,
+        content: '기본 시스템 프롬프트',
+        isActive: false,
+        userId: null,
+        createdAt: '2026-09-01T00:00:00Z',
+      };
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(defaultPrompt);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce([]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const settingBtn = screen.getByRole('button', { name: /AI 설정/i });
+      await act(async () => {
+        fireEvent.click(settingBtn);
+      });
+
+      const deleteSlotBtn = screen.getByRole('button', { name: /v1 삭제/i });
+      await act(async () => {
+        fireEvent.click(deleteSlotBtn);
+      });
+
+      expect(aiApi.deleteMyPromptVersion).toHaveBeenCalledWith(1);
+      expect(screen.getByText('프롬프트 슬롯이 삭제되었습니다.')).toBeInTheDocument();
+      expect(screen.getByText('기본값 사용 중')).toBeInTheDocument();
+      expect(screen.getByText('저장된 프롬프트 목록 (0 / 10)')).toBeInTheDocument();
+    });
+
+    it('Given 슬롯이 이미 10개인 경우 When 저장을 시도하면 Then 에러 메시지가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const tenPrompts: aiApi.MyPromptOut[] = Array.from({ length: 10 }, (_, i) => ({
+        id: `p-${i + 1}`,
+        name: 'rag-qa-system',
+        version: i + 1,
+        content: `프롬프트 ${i + 1}`,
+        isActive: i === 9,
+        userId: 'user-1',
+        createdAt: '2026-09-01T00:00:00Z',
+      }));
+
+      vi.mocked(aiApi.getMyPrompt).mockResolvedValueOnce(tenPrompts[9]);
+      vi.mocked(aiApi.getMyPromptList).mockResolvedValueOnce(tenPrompts);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const settingBtn = screen.getByRole('button', { name: /AI 설정/i });
+      await act(async () => {
+        fireEvent.click(settingBtn);
+      });
+
+      expect(screen.getByText('저장된 프롬프트 목록 (10 / 10)')).toBeInTheDocument();
+      const saveBtn = screen.getByRole('button', { name: /새 슬롯으로 저장 및 적용/i });
+      expect(saveBtn).toBeDisabled();
+      expect(screen.getByText(/최대 10개까지 저장할 수 있습니다/i)).toBeInTheDocument();
     });
   });
 });
