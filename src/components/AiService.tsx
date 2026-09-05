@@ -618,9 +618,80 @@ export const AiService = () => {
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
 
+  const completedDocsCount = documents.filter((d) => d.status === 'processed').length;
+  const processingDocsCount = documents.filter((d) => d.status === 'processing' || d.status === 'pending' || d.status === 'queued').length;
+  const failedDocsCount = documents.filter((d) => d.status === 'failed' || d.status === 'error').length;
+  const activeSessionsCount = sessions.length;
+
   return (
-    <div className="ai-service-container">
-      <h3 className="section-title">AI 지식베이스 Q&A 서비스</h3>
+    <div className="ai-service-container" data-testid="ai-work-hub">
+      <div className="ai-hub-header">
+        <h3 className="section-title">AI 작업 허브</h3>
+        <p className="ai-hub-subtitle">
+          지식베이스 문서 관리, 실시간 AI Q&A 대화 및 프롬프트 설정을 한눈에 확인하고 제어합니다.
+        </p>
+      </div>
+
+      {/* 최근 작업 및 상태 요약 대시보드 (SPEC-028) */}
+      <div className="ai-hub-dashboard glass-panel" data-testid="ai-hub-dashboard">
+        <div className="ai-hub-dashboard-header">
+          <h4 className="ai-hub-dashboard-title">작업 상태 요약</h4>
+          <div className="ai-hub-actions">
+            <button
+              type="button"
+              onClick={() => setIsChatOpen(true)}
+              className="hub-nav-btn hub-nav-btn--primary"
+            >
+              새 질문 시작
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="hub-nav-btn"
+              disabled={uploading}
+            >
+              새 문서 업로드
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenPromptSettings}
+              className="hub-nav-btn"
+            >
+              프롬프트 설정 ⚙
+            </button>
+          </div>
+        </div>
+
+        <div className="ai-hub-metrics-grid">
+          <div className="hub-metric-card" data-testid="metric-docs">
+            <span className="hub-metric-label">완료된 문서</span>
+            <span className="hub-metric-value">{completedDocsCount}</span>
+            <span className="hub-metric-desc">색인 완료 문서</span>
+          </div>
+          <div className="hub-metric-card" data-testid="metric-processing">
+            <span className="hub-metric-label">진행 중인 작업</span>
+            <span className={`hub-metric-value ${processingDocsCount > 0 ? 'text-highlight' : ''}`}>
+              {processingDocsCount + (isStreaming ? 1 : 0)}
+            </span>
+            <span className="hub-metric-desc">
+              {isStreaming ? '답변 스트리밍 중' : processingDocsCount > 0 ? '인제스트 처리 중' : '대기 중인 작업 없음'}
+            </span>
+          </div>
+          <div className="hub-metric-card" data-testid="metric-failed">
+            <span className="hub-metric-label">실패 / 오류</span>
+            <span className={`hub-metric-value ${failedDocsCount > 0 ? 'text-error' : ''}`}>
+              {failedDocsCount}
+            </span>
+            <span className="hub-metric-desc">재시도 필요</span>
+          </div>
+          <div className="hub-metric-card" data-testid="metric-sessions">
+            <span className="hub-metric-label">대화 세션</span>
+            <span className="hub-metric-value">{activeSessionsCount}</span>
+            <span className="hub-metric-desc">저장된 Q&A 이력</span>
+          </div>
+        </div>
+      </div>
+
       {errorMsg && <div className="error-banner">{errorMsg}</div>}
 
       <div className="ai-layout">
