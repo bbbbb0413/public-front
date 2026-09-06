@@ -61,6 +61,8 @@ describe('PaymentHistory Component', () => {
     expect(screen.queryByPlaceholderText('결제 ID 입력')).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('101')).toBeInTheDocument());
+    expect(screen.getByText('gold_500')).toBeInTheDocument();
+    expect(screen.getByText('gold_100')).toBeInTheDocument();
     expect(screen.getByText('COMPLETED')).toHaveClass('status-success');
     expect(screen.getByText('FAILED')).toHaveClass('status-failed');
   });

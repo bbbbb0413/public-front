@@ -46,6 +46,8 @@ describe('payment API', () => {
       idempotencyKey: expect.any(String),
     });
     expect(result.paymentId).toBe(101);
+    expect(result.accountId).toBe(42);
+    expect(result.productId).toBe('gold_500');
     expect(result.status).toBe('COMPLETED');
   });
 
@@ -87,6 +89,7 @@ describe('payment API', () => {
     const result = await getPayment(101);
     expect(mockAxios.get).toHaveBeenCalledWith('/payments/101');
     expect(result.paymentId).toBe(101);
+    expect(result.accountId).toBe(42);
     expect(result.productId).toBe('gold_500');
   });
 
@@ -110,6 +113,8 @@ describe('payment API', () => {
     expect(mockAxios.get).toHaveBeenCalledWith('/payments', { params: { page: 1, take: 20 } });
     expect(result.payments).toHaveLength(1);
     expect(result.payments[0].paymentId).toBe(101);
+    expect(result.payments[0].accountId).toBe(42);
+    expect(result.payments[0].productId).toBe('gold_500');
   });
 });
 
