@@ -83,6 +83,8 @@ describe('Payment Component', () => {
     // 영수증 확인
     expect(screen.getByText('결제가 완료되었습니다!')).toBeInTheDocument();
     expect(screen.getByText(/999/)).toBeInTheDocument(); // Payment ID
+    expect(screen.getByText('상품 코드')).toBeInTheDocument();
+    expect(screen.getByText('gold_100')).toBeInTheDocument();
   });
 
   it('shows a failure message and failed styling when the backend reports FAILED', async () => {
