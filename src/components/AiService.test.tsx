@@ -18,6 +18,10 @@ vi.mock('../api/ai', () => {
     getDocumentFile: vi.fn(),
     submitAnswerFeedback: vi.fn(),
     getSessionFeedback: vi.fn().mockResolvedValue([]),
+    toggleSessionBookmark: vi.fn(),
+    getBookmarks: vi.fn().mockResolvedValue([]),
+    createBookmark: vi.fn(),
+    deleteBookmark: vi.fn(),
     getMyPrompt: vi.fn(),
     getMyPromptList: vi.fn(),
     saveMyPrompt: vi.fn(),
@@ -3207,6 +3211,232 @@ describe('AiService Component', () => {
         fireEvent.click(promptSettingBtn);
       });
       expect(screen.getByText('AI 답변 스타일 설정')).toBeInTheDocument();
+    });
+  });
+
+  describe('SPEC-029: 대화 기록 조회 및 검색 — 키워드 검색, 답변 및 세션 보관(북마크)', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-1', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 대화 목록에 snippet 및 북마크 정보가 있을 때 When 사이드바가 렌더링되면 Then 질문 스니펫과 북마크 토글 버튼이 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          title: '환불 규정 문의',
+          snippet: '환불은 결제일로부터 며칠 이내에 가능한가요?',
+          isBookmarked: false,
+          updatedAt: '2026-09-08T00:00:00Z',
+        },
+        {
+          sessionId: 'sess-2',
+          title: '배송 정책 문의',
+          snippet: '도서산간 지역 배송비가 어떻게 되나요?',
+          isBookmarked: true,
+          updatedAt: '2026-09-08T01:00:00Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      expect(screen.getByText('환불 규정 문의')).toBeInTheDocument();
+      expect(screen.getByText('환불은 결제일로부터 며칠 이내에 가능한가요?')).toBeInTheDocument();
+      expect(screen.getByText('배송 정책 문의')).toBeInTheDocument();
+      expect(screen.getByText('도서산간 지역 배송비가 어떻게 되나요?')).toBeInTheDocument();
+
+      const bookmarkButtons = screen.getAllByRole('button', { name: /보관/i });
+      expect(bookmarkButtons.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('Given 검색어를 입력하고 검색할 때 When 검색을 실행하면 Then getSessions에 검색어 파라미터가 전달되고 필터링된 결과가 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-1',
+          title: '전체 세션 1',
+          snippet: '환불 규정 질의',
+          isBookmarked: false,
+          updatedAt: '2026-09-08T00:00:00Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const searchInput = screen.getByPlaceholderText(/대화 검색/i);
+      expect(searchInput).toBeInTheDocument();
+
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-filtered',
+          title: '검색된 세션',
+          snippet: '검색된 질문 스니펫',
+          isBookmarked: false,
+          updatedAt: '2026-09-08T00:00:00Z',
+        },
+      ]);
+
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: '검색어' } });
+      });
+
+      const searchSubmitBtn = screen.getByRole('button', { name: /검색 실행/i });
+      await act(async () => {
+        fireEvent.click(searchSubmitBtn);
+      });
+
+      expect(aiApi.getSessions).toHaveBeenCalledWith('test-user-1', 1, 50, '검색어');
+      expect(screen.getByText('검색된 세션')).toBeInTheDocument();
+    });
+
+    it('Given 보관함 탭을 클릭할 때 When 탭을 전환하면 Then 북마크된 세션/답변 목록이 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.getBookmarks).mockResolvedValueOnce([
+        {
+          id: 'bm-1',
+          sessionId: 'sess-bm',
+          turnIndex: 1,
+          title: '보관된 대화 세션',
+          content: '보관된 AI 답변입니다.',
+          note: '중요 메모',
+          createdAt: '2026-09-08T00:00:00Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+
+      expect(aiApi.getBookmarks).toHaveBeenCalled();
+      expect(screen.getByText('보관된 대화 세션')).toBeInTheDocument();
+      expect(screen.getByText('보관된 AI 답변입니다.')).toBeInTheDocument();
+      expect(screen.getByText('중요 메모')).toBeInTheDocument();
+    });
+
+    it('Given 세션 북마크 버튼을 누를 때 When 토글하면 Then toggleSessionBookmark API가 호출되고 상태가 변경된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          title: '북마크 테스트 세션',
+          snippet: '스니펫',
+          isBookmarked: false,
+          updatedAt: '2026-09-08T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.toggleSessionBookmark).mockResolvedValueOnce({
+        sessionId: 'sess-1',
+        bookmarked: true,
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionBookmarkBtn = screen.getByRole('button', { name: /보관$/i });
+      await act(async () => {
+        fireEvent.click(sessionBookmarkBtn);
+      });
+
+      expect(aiApi.toggleSessionBookmark).toHaveBeenCalledWith('sess-1', true);
+    });
+
+    it('Given 채팅 답변에 보관 버튼이 있을 때 When 클릭하면 Then createBookmark API가 호출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-chat', title: '대화 세션 제목', updatedAt: '2026-09-08T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-chat',
+        title: '대화 세션 제목',
+        createdAt: '2026-09-08T00:00:00Z',
+        updatedAt: '2026-09-08T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-09-08T00:00:00Z' },
+          { role: 'assistant', content: '보관할 AI 답변', createdAt: '2026-09-08T00:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.createBookmark).mockResolvedValueOnce({
+        id: 'bm-new',
+        sessionId: 'sess-chat',
+        turnIndex: 1,
+        content: '보관할 AI 답변',
+        createdAt: '2026-09-08T00:00:02Z',
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        const sessionItem = screen.getByText('대화 세션 제목');
+        fireEvent.click(sessionItem);
+      });
+
+      const answerBookmarkBtn = screen.getByRole('button', { name: /답변 보관/i });
+      await act(async () => {
+        fireEvent.click(answerBookmarkBtn);
+      });
+
+      expect(aiApi.createBookmark).toHaveBeenCalledWith({
+        sessionId: 'sess-chat',
+        turnIndex: 1,
+      });
     });
   });
 });

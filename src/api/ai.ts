@@ -274,7 +274,25 @@ export interface AgentProgress {
 export interface SessionOut {
   sessionId: string;
   title: string;
+  snippet?: string;
+  isBookmarked?: boolean;
   updatedAt: string;
+}
+
+export interface BookmarkItem {
+  id: string;
+  sessionId: string;
+  turnIndex?: number;
+  title?: string;
+  content?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface CreateBookmarkIn {
+  sessionId: string;
+  turnIndex?: number;
+  note?: string;
 }
 
 export interface SessionTurn {
@@ -294,9 +312,48 @@ export interface SessionDetailOut {
   updatedAt: string;
 }
 
-export const getSessions = async (userId: string, page = 1, limit = 20): Promise<SessionOut[]> => {
-  const response = await client.get('/ai/rag/sessions', { params: { userId, page, limit } });
+export const getSessions = async (
+  userId: string,
+  page = 1,
+  limit = 20,
+  q?: string,
+  bookmarked?: boolean,
+): Promise<SessionOut[]> => {
+  const params: Record<string, unknown> = { userId, page, limit };
+  if (q !== undefined && q !== '') params.q = q;
+  if (bookmarked !== undefined) params.bookmarked = bookmarked;
+  const response = await client.get('/ai/rag/sessions', { params });
   return response.data ?? [];
+};
+
+export const toggleSessionBookmark = async (
+  sessionId: string,
+  bookmarked: boolean,
+): Promise<{ sessionId: string; bookmarked: boolean }> => {
+  const response = await client.patch(`/ai/rag/sessions/${sessionId}/bookmark`, { bookmarked });
+  return response.data;
+};
+
+export const getBookmarks = async (
+  page = 1,
+  limit = 20,
+  q?: string,
+): Promise<BookmarkItem[]> => {
+  const params: Record<string, unknown> = { page, limit };
+  if (q !== undefined && q !== '') params.q = q;
+  const response = await client.get('/ai/rag/bookmarks', { params });
+  return response.data ?? [];
+};
+
+export const createBookmark = async (
+  input: CreateBookmarkIn,
+): Promise<BookmarkItem> => {
+  const response = await client.post('/ai/rag/bookmarks', input);
+  return response.data;
+};
+
+export const deleteBookmark = async (bookmarkId: string): Promise<void> => {
+  await client.delete(`/ai/rag/bookmarks/${bookmarkId}`);
 };
 
 export const getSessionDetail = async (sessionId: string): Promise<SessionDetailOut | null> => {

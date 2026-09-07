@@ -23,6 +23,10 @@ import {
   getSessions,
   getSessionDetail,
   deleteSessionById,
+  toggleSessionBookmark,
+  getBookmarks,
+  createBookmark,
+  deleteBookmark,
   subscribeIngestJob,
   getMyPrompt,
   getMyPromptList,
@@ -80,15 +84,72 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(mockAxios.delete).toHaveBeenCalledWith('/ai/knowledge/documents/doc-123');
   });
 
-  it('getSessions should fetch sessions via gateway', async () => {
-    const mockSessions = [{ sessionId: 's1', title: 'hi', updatedAt: '2026-06-18T00:00:00.000Z' }];
+  it('getSessions should fetch sessions via gateway with search and bookmarked params', async () => {
+    const mockSessions = [
+      {
+        sessionId: 's1',
+        title: 'hi',
+        snippet: '최근 질문 미리보기...',
+        isBookmarked: true,
+        updatedAt: '2026-06-18T00:00:00.000Z',
+      },
+    ];
     mockAxios.get.mockResolvedValueOnce({ data: mockSessions });
 
-    const result = await getSessions('user-1');
+    const result = await getSessions('user-1', 1, 20, '환불', true);
     expect(mockAxios.get).toHaveBeenCalledWith('/ai/rag/sessions', {
-      params: { userId: 'user-1', page: 1, limit: 20 },
+      params: { userId: 'user-1', page: 1, limit: 20, q: '환불', bookmarked: true },
     });
     expect(result).toEqual(mockSessions);
+  });
+
+  it('toggleSessionBookmark should call PATCH /ai/rag/sessions/:sessionId/bookmark', async () => {
+    mockAxios.patch = vi.fn().mockResolvedValueOnce({ data: { sessionId: 's1', bookmarked: true } });
+
+    const result = await toggleSessionBookmark('s1', true);
+    expect(mockAxios.patch).toHaveBeenCalledWith('/ai/rag/sessions/s1/bookmark', { bookmarked: true });
+    expect(result).toEqual({ sessionId: 's1', bookmarked: true });
+  });
+
+  it('getBookmarks should call GET /ai/rag/bookmarks with query params', async () => {
+    const mockBookmarks = [
+      {
+        id: 'bm-1',
+        sessionId: 's1',
+        turnIndex: 1,
+        title: '세션 제목',
+        content: '보관된 답변 본문',
+        note: '중요한 답변',
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+    mockAxios.get.mockResolvedValueOnce({ data: mockBookmarks });
+
+    const result = await getBookmarks(1, 20, '보관');
+    expect(mockAxios.get).toHaveBeenCalledWith('/ai/rag/bookmarks', {
+      params: { page: 1, limit: 20, q: '보관' },
+    });
+    expect(result).toEqual(mockBookmarks);
+  });
+
+  it('createBookmark should call POST /ai/rag/bookmarks', async () => {
+    const created = { id: 'bm-2', sessionId: 's1', turnIndex: 1 };
+    mockAxios.post.mockResolvedValueOnce({ data: created });
+
+    const result = await createBookmark({ sessionId: 's1', turnIndex: 1, note: '메모' });
+    expect(mockAxios.post).toHaveBeenCalledWith('/ai/rag/bookmarks', {
+      sessionId: 's1',
+      turnIndex: 1,
+      note: '메모',
+    });
+    expect(result).toEqual(created);
+  });
+
+  it('deleteBookmark should call DELETE /ai/rag/bookmarks/:bookmarkId', async () => {
+    mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+
+    await deleteBookmark('bm-1');
+    expect(mockAxios.delete).toHaveBeenCalledWith('/ai/rag/bookmarks/bm-1');
   });
 
   it('getSessionDetail should fetch a session by id via gateway', async () => {
