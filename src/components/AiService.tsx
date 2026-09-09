@@ -11,6 +11,10 @@ import {
   getSessions,
   getSessionDetail,
   deleteSessionById,
+  toggleSessionBookmark,
+  getBookmarks,
+  createBookmark,
+  deleteBookmark,
   subscribeIngestJob,
   getMyPrompt,
   getMyPromptList,
@@ -21,6 +25,7 @@ import {
   getDocumentFile,
   SourceRef,
   SessionOut,
+  BookmarkItem,
   AgentProgress,
   AgentPhase,
   MyPromptOut,
@@ -88,6 +93,12 @@ export const AiService = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionOut[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
+  const [sidebarTab, setSidebarTab] = useState<'sessions' | 'bookmarks'>('sessions');
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
+  const [loadingBookmarks, setLoadingBookmarks] = useState(false);
+  const [bookmarkSuccessMsg, setBookmarkSuccessMsg] = useState<string | null>(null);
+  const bookmarkMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
@@ -111,6 +122,12 @@ export const AiService = () => {
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const showBookmarkToast = (msg: string) => {
+    setBookmarkSuccessMsg(msg);
+    if (bookmarkMsgTimerRef.current) clearTimeout(bookmarkMsgTimerRef.current);
+    bookmarkMsgTimerRef.current = setTimeout(() => setBookmarkSuccessMsg(null), 3000);
+  };
+
   const handleCopyAnswer = async (text: string, index: number) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -128,16 +145,85 @@ export const AiService = () => {
   const activeStreamCancelRef = useRef<(() => Promise<void>) | null>(null);
   const streamingAnswerRef = useRef<string>('');
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (searchQuery?: string) => {
     if (!userId) return;
     setLoadingSessions(true);
     try {
-      const data = await getSessions(userId);
+      const q = searchQuery !== undefined ? searchQuery : sessionSearchQuery;
+      const data = await getSessions(userId, 1, 50, q || undefined);
       setSessions(data || []);
     } catch {
       // 세션 목록 불러오기 실패는 주 기능에 치명적이지 않으므로 콘솔 로그만 남김
     } finally {
       setLoadingSessions(false);
+    }
+  };
+
+  const fetchBookmarks = async (searchQuery?: string) => {
+    if (!userId) return;
+    setLoadingBookmarks(true);
+    try {
+      const q = searchQuery !== undefined ? searchQuery : sessionSearchQuery;
+      const data = await getBookmarks(1, 50, q || undefined);
+      setBookmarks(data || []);
+    } catch {
+      // 북마크 목록 불러오기 실패 시 무시
+    } finally {
+      setLoadingBookmarks(false);
+    }
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sidebarTab === 'sessions') {
+      fetchSessions(sessionSearchQuery);
+    } else {
+      fetchBookmarks(sessionSearchQuery);
+    }
+  };
+
+  const handleToggleSessionBookmark = async (sId: string, currentBookmarked: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const nextStatus = !currentBookmarked;
+      await toggleSessionBookmark(sId, nextStatus);
+      setSessions((prev) =>
+        prev.map((s) => (s.sessionId === sId ? { ...s, isBookmarked: nextStatus } : s)),
+      );
+      if (sidebarTab === 'bookmarks') {
+        fetchBookmarks();
+      }
+      showBookmarkToast(nextStatus ? '세션이 보관되었습니다.' : '세션 보관이 해제되었습니다.');
+    } catch {
+      setErrorMsg('세션 보관 상태 변경에 실패했습니다.');
+    }
+  };
+
+  const handleBookmarkAnswer = async (turnIndex: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!sessionId) return;
+    try {
+      await createBookmark({
+        sessionId,
+        turnIndex,
+      });
+      showBookmarkToast('답변이 보관함에 저장되었습니다.');
+      if (sidebarTab === 'bookmarks') {
+        fetchBookmarks();
+      }
+    } catch {
+      setErrorMsg('답변 보관에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteBookmark = async (bookmarkId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteBookmark(bookmarkId);
+      setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
+      showBookmarkToast('보관 항목이 삭제되었습니다.');
+    } catch {
+      setErrorMsg('보관 항목 삭제에 실패했습니다.');
     }
   };
 
@@ -831,7 +917,30 @@ export const AiService = () => {
             {userId && (
               <aside className="chat-session-sidebar" aria-label="대화 이력">
                 <div className="session-sidebar-header">
-                  <span className="session-sidebar-title">대화 이력</span>
+                  <div className="session-sidebar-tabs" role="tablist">
+                    <button
+                      role="tab"
+                      aria-selected={sidebarTab === 'sessions'}
+                      className={`sidebar-tab-btn${sidebarTab === 'sessions' ? ' active' : ''}`}
+                      onClick={() => {
+                        setSidebarTab('sessions');
+                        fetchSessions();
+                      }}
+                    >
+                      대화 목록
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={sidebarTab === 'bookmarks'}
+                      className={`sidebar-tab-btn${sidebarTab === 'bookmarks' ? ' active' : ''}`}
+                      onClick={() => {
+                        setSidebarTab('bookmarks');
+                        fetchBookmarks();
+                      }}
+                    >
+                      보관함
+                    </button>
+                  </div>
                   <button
                     className="btn-new-chat"
                     onClick={handleNewChat}
@@ -840,29 +949,122 @@ export const AiService = () => {
                     +
                   </button>
                 </div>
-                {loadingSessions ? (
-                  <div className="session-loading">로딩 중...</div>
-                ) : sessions.length === 0 ? (
-                  <div className="session-empty">저장된 대화가 없습니다</div>
-                ) : (
-                  <ul className="session-list">
-                    {sessions.map((s) => (
-                      <li
-                        key={s.sessionId}
-                        className={`session-item${sessionId === s.sessionId ? ' active' : ''}`}
-                        onClick={() => handleLoadSession(s.sessionId)}
-                      >
-                        <span className="session-item-title">{s.title}</span>
-                        <button
-                          className="btn-delete-session"
-                          onClick={(e) => handleDeleteSession(s.sessionId, e)}
-                          aria-label={`${s.title} 삭제`}
+
+                {/* 검색 폼 */}
+                <form onSubmit={handleSearchSubmit} className="session-search-form">
+                  <input
+                    type="text"
+                    value={sessionSearchQuery}
+                    onChange={(e) => setSessionSearchQuery(e.target.value)}
+                    placeholder={sidebarTab === 'sessions' ? '대화 검색...' : '보관 검색...'}
+                    className="session-search-input"
+                  />
+                  <button
+                    type="submit"
+                    className="session-search-btn"
+                    aria-label="검색 실행"
+                  >
+                    🔍
+                  </button>
+                  {sessionSearchQuery && (
+                    <button
+                      type="button"
+                      className="session-search-clear"
+                      onClick={() => {
+                        setSessionSearchQuery('');
+                        if (sidebarTab === 'sessions') fetchSessions('');
+                        else fetchBookmarks('');
+                      }}
+                      aria-label="검색어 초기화"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </form>
+
+                {bookmarkSuccessMsg && (
+                  <div className="session-toast-msg">{bookmarkSuccessMsg}</div>
+                )}
+
+                {sidebarTab === 'sessions' ? (
+                  loadingSessions ? (
+                    <div className="session-loading">로딩 중...</div>
+                  ) : sessions.length === 0 ? (
+                    <div className="session-empty">
+                      {sessionSearchQuery ? '검색된 대화가 없습니다' : '저장된 대화가 없습니다'}
+                    </div>
+                  ) : (
+                    <ul className="session-list">
+                      {sessions.map((s) => (
+                        <li
+                          key={s.sessionId}
+                          className={`session-item${sessionId === s.sessionId ? ' active' : ''}`}
+                          onClick={() => handleLoadSession(s.sessionId)}
                         >
-                          ✕
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                          <div className="session-item-content">
+                            <span className="session-item-title">{s.title}</span>
+                            {s.snippet && (
+                              <span className="session-item-snippet">{s.snippet}</span>
+                            )}
+                          </div>
+                          <div className="session-item-actions">
+                            <button
+                              className={`btn-bookmark-session${s.isBookmarked ? ' bookmarked' : ''}`}
+                              onClick={(e) => handleToggleSessionBookmark(s.sessionId, Boolean(s.isBookmarked), e)}
+                              aria-label={s.isBookmarked ? `${s.title} 보관 해제` : `${s.title} 보관`}
+                              title={s.isBookmarked ? '보관 해제' : '세션 보관'}
+                            >
+                              {s.isBookmarked ? '★' : '☆'}
+                            </button>
+                            <button
+                              className="btn-delete-session"
+                              onClick={(e) => handleDeleteSession(s.sessionId, e)}
+                              aria-label={`${s.title} 삭제`}
+                              title="삭제"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                ) : (
+                  loadingBookmarks ? (
+                    <div className="session-loading">로딩 중...</div>
+                  ) : bookmarks.length === 0 ? (
+                    <div className="session-empty">
+                      {sessionSearchQuery ? '검색된 보관 항목이 없습니다' : '보관된 항목이 없습니다'}
+                    </div>
+                  ) : (
+                    <ul className="session-list">
+                      {bookmarks.map((b) => (
+                        <li
+                          key={b.id}
+                          className={`session-item bookmark-item${sessionId === b.sessionId ? ' active' : ''}`}
+                          onClick={() => handleLoadSession(b.sessionId)}
+                        >
+                          <div className="session-item-content">
+                            {b.title && <span className="session-item-title">{b.title}</span>}
+                            {b.content && (
+                              <span className="session-item-snippet">{b.content}</span>
+                            )}
+                            {b.note && <span className="session-item-note">{b.note}</span>}
+                          </div>
+                          <div className="session-item-actions">
+                            <button
+                              className="btn-delete-session"
+                              onClick={(e) => handleDeleteBookmark(b.id, e)}
+                              aria-label="보관 항목 삭제"
+                              title="보관 삭제"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 )}
               </aside>
             )}
@@ -929,6 +1131,16 @@ export const AiService = () => {
                             </div>
                           )}
                           <div className="message-actions">
+                            {sessionId && (
+                              <button
+                                type="button"
+                                className="btn-bookmark-answer"
+                                onClick={(e) => handleBookmarkAnswer(idx, e)}
+                                aria-label="답변 보관"
+                              >
+                                ★ 보관
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="btn-copy-answer"
