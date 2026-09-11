@@ -3438,6 +3438,193 @@ describe('AiService Component', () => {
         turnIndex: 1,
       });
     });
+
+    describe('SPEC-035: 대화 세션 목록 키워드 검색 수용 기준 검증', () => {
+      it('AC 1: Given 사용자 A가 "매출 보고서 분석"과 "보안 가이드라인" 두 개의 대화 세션을 보유하고 있을 때 When 사이드바 검색창에 "매출"을 입력하면 Then 세션 목록에 "매출 보고서 분석" 세션만 노출되고 "보안 가이드라인"은 목록에서 제외된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const allSessions = [
+          {
+            sessionId: 'sess-1',
+            title: '매출 보고서 분석',
+            snippet: '2026년 3분기 매출 지표',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+          {
+            sessionId: 'sess-2',
+            title: '보안 가이드라인',
+            snippet: '사내 보안 지침',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce(allSessions);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        expect(screen.getByText('매출 보고서 분석')).toBeInTheDocument();
+        expect(screen.getByText('보안 가이드라인')).toBeInTheDocument();
+
+        // When: "매출" 검색
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        const filteredSessions = [
+          {
+            sessionId: 'sess-1',
+            title: '매출 보고서 분석',
+            snippet: '2026년 3분기 매출 지표',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce(filteredSessions);
+
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '매출' } });
+        });
+
+        const searchSubmitBtn = screen.getByRole('button', { name: /검색 실행/i });
+        await act(async () => {
+          fireEvent.click(searchSubmitBtn);
+        });
+
+        // Then: "매출"로 getSessions 호출되고 "매출 보고서 분석"만 노출됨
+        expect(aiApi.getSessions).toHaveBeenCalledWith('test-user-1', 1, 50, '매출');
+        expect(screen.getByText('매출 보고서 분석')).toBeInTheDocument();
+        expect(screen.queryByText('보안 가이드라인')).not.toBeInTheDocument();
+      });
+
+      it('AC 2: Given 대화 세션 목록이 검색어로 필터링된 상태에서 When 검색창의 텍스트를 모두 지우거나 초기화 버튼을 누르면 Then 전체 세션 목록이 다시 로드되어 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const allSessions = [
+          {
+            sessionId: 'sess-1',
+            title: '매출 보고서 분석',
+            snippet: '매출 분석 내용',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+          {
+            sessionId: 'sess-2',
+            title: '보안 가이드라인',
+            snippet: '보안 지침 내용',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([allSessions[0]]);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '매출' } });
+        });
+
+        // 초기화(✕) 버튼이 노출됨
+        const clearBtn = screen.getByRole('button', { name: /검색어 초기화/i });
+        expect(clearBtn).toBeInTheDocument();
+
+        // When: 초기화 버튼 클릭
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce(allSessions);
+        await act(async () => {
+          fireEvent.click(clearBtn);
+        });
+
+        // Then: getSessions가 검색어 없이 호출되고 전체 세션 목록이 복원됨
+        expect(aiApi.getSessions).toHaveBeenCalledWith('test-user-1', 1, 50, undefined);
+        expect(screen.getByText('매출 보고서 분석')).toBeInTheDocument();
+        expect(screen.getByText('보안 가이드라인')).toBeInTheDocument();
+      });
+
+      it('AC 3: Given 사용자 A가 보유한 세션 제목과 일치하지 않는 검색어를 입력할 때 When 검색 요청이 완료되면 Then "검색 결과가 없습니다" 안내 텍스트가 표시되고 에러가 발생하지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([]);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([]);
+
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '존재하지않는제목' } });
+        });
+
+        const searchSubmitBtn = screen.getByRole('button', { name: /검색 실행/i });
+        await act(async () => {
+          fireEvent.click(searchSubmitBtn);
+        });
+
+        expect(aiApi.getSessions).toHaveBeenCalledWith('test-user-1', 1, 50, '존재하지않는제목');
+        expect(screen.getByText('검색 결과가 없습니다')).toBeInTheDocument();
+      });
+
+      it('AC 4: Given 사용자 B가 동일한 제목의 세션을 보유하고 있을 때 When 사용자 A가 검색하면 Then 오직 사용자 A 본인의 userId로만 API 요청이 전송된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          {
+            sessionId: 'sess-user-a',
+            title: '매출 보고서 분석',
+            isBookmarked: false,
+            updatedAt: '2026-09-12T00:00:00Z',
+          },
+        ]);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '매출' } });
+        });
+
+        const searchSubmitBtn = screen.getByRole('button', { name: /검색 실행/i });
+        await act(async () => {
+          fireEvent.click(searchSubmitBtn);
+        });
+
+        // 사용자 A의 auth.user.id ('test-user-1')가 정확히 전달되었는지 검증
+        expect(aiApi.getSessions).toHaveBeenLastCalledWith('test-user-1', 1, 50, '매출');
+      });
+    });
   });
 });
 

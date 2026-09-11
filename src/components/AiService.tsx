@@ -991,7 +991,7 @@ export const AiService = () => {
                     <div className="session-loading">로딩 중...</div>
                   ) : sessions.length === 0 ? (
                     <div className="session-empty">
-                      {sessionSearchQuery ? '검색된 대화가 없습니다' : '저장된 대화가 없습니다'}
+                      {sessionSearchQuery ? '검색 결과가 없습니다' : '저장된 대화가 없습니다'}
                     </div>
                   ) : (
                     <ul className="session-list">
