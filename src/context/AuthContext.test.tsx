@@ -125,6 +125,44 @@ describe('AuthContext', () => {
     expect(storedUser.uuid).toBe('test-uuid-42');
   });
 
+  it('should store accountId in user and localStorage upon successful register', async () => {
+    const mockToken = 'mock-jwt-token-reg';
+    const mockResponse = {
+      data: {
+        data: {
+          token: mockToken,
+          uuid: 'test-uuid-reg',
+          nickName: 'NewTester',
+          accountId: 99,
+        },
+      },
+    };
+
+    vi.mocked(axios.post).mockResolvedValueOnce(mockResponse);
+
+    const RegisterConsumer = () => {
+      const auth = useContext(AuthContext);
+      if (!auth) return null;
+      return <button onClick={() => auth.register('NewTester')} data-testid="register-btn">Register</button>;
+    };
+
+    render(
+      <AuthProvider>
+        <RegisterConsumer />
+      </AuthProvider>
+    );
+
+    const registerBtn = screen.getByTestId('register-btn');
+    await act(async () => {
+      registerBtn.click();
+    });
+
+    expect(axios.post).toHaveBeenCalledWith('/auth/register', { nickName: 'NewTester' });
+    const storedUser = JSON.parse(window.localStorage.getItem('user_info') || '{}');
+    expect(storedUser.accountId).toBe(99);
+    expect(storedUser.uuid).toBe('test-uuid-reg');
+  });
+
   it('should restore legacy user without accountId from localStorage safely', () => {
     window.localStorage.setItem('token', 'legacy-token');
     window.localStorage.setItem('user_info', JSON.stringify({ uuid: 'legacy-uuid', nickName: 'OldUser' }));
