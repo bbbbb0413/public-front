@@ -27,21 +27,23 @@ describe('identity API', () => {
 
   it('login posts uuid and returns auth token response', async () => {
     mockAxios.post.mockResolvedValueOnce({
-      data: { data: { token: 'jwt-abc', uuid: 'user-1', nickName: 'Alice' } },
+      data: { data: { token: 'jwt-abc', uuid: 'user-1', nickName: 'Alice', accountId: 101 } },
     });
     const result = await login('user-1');
     expect(mockAxios.post).toHaveBeenCalledWith('/auth/login', { uuid: 'user-1' });
     expect(result.token).toBe('jwt-abc');
     expect(result.nickName).toBe('Alice');
+    expect(result.accountId).toBe(101);
   });
 
   it('register posts optional nickName and returns auth token response', async () => {
     mockAxios.post.mockResolvedValueOnce({
-      data: { data: { token: 'jwt-xyz', uuid: 'user-2', nickName: 'Bob' } },
+      data: { data: { token: 'jwt-xyz', uuid: 'user-2', nickName: 'Bob', accountId: 102 } },
     });
     const result = await register('Bob');
     expect(mockAxios.post).toHaveBeenCalledWith('/auth/register', { nickName: 'Bob' });
     expect(result.uuid).toBe('user-2');
+    expect(result.accountId).toBe(102);
   });
 
   it('register without nickName passes undefined', async () => {

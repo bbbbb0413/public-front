@@ -4,6 +4,7 @@ export interface AuthTokenResponse {
   token: string;
   uuid: string;
   nickName: string;
+  accountId?: number;
 }
 
 export interface GameAccountReply {
