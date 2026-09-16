@@ -93,4 +93,87 @@ describe('AuthContext', () => {
     expect(window.localStorage.getItem('token')).toBe(mockToken);
     expect(screen.getByTestId('is-authenticated')).toHaveTextContent('true');
   });
+
+  it('should store accountId in user and localStorage upon successful login', async () => {
+    const mockToken = 'mock-jwt-token';
+    const mockResponse = {
+      data: {
+        data: {
+          token: mockToken,
+          uuid: 'test-uuid-42',
+          nickName: 'Tester',
+          accountId: 42,
+        },
+      },
+    };
+
+    vi.mocked(axios.post).mockResolvedValueOnce(mockResponse);
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    const loginBtn = screen.getByTestId('login-btn');
+    await act(async () => {
+      loginBtn.click();
+    });
+
+    const storedUser = JSON.parse(window.localStorage.getItem('user_info') || '{}');
+    expect(storedUser.accountId).toBe(42);
+    expect(storedUser.uuid).toBe('test-uuid-42');
+  });
+
+  it('should store accountId in user and localStorage upon successful register', async () => {
+    const mockToken = 'mock-jwt-token-reg';
+    const mockResponse = {
+      data: {
+        data: {
+          token: mockToken,
+          uuid: 'test-uuid-reg',
+          nickName: 'NewTester',
+          accountId: 99,
+        },
+      },
+    };
+
+    vi.mocked(axios.post).mockResolvedValueOnce(mockResponse);
+
+    const RegisterConsumer = () => {
+      const auth = useContext(AuthContext);
+      if (!auth) return null;
+      return <button onClick={() => auth.register('NewTester')} data-testid="register-btn">Register</button>;
+    };
+
+    render(
+      <AuthProvider>
+        <RegisterConsumer />
+      </AuthProvider>
+    );
+
+    const registerBtn = screen.getByTestId('register-btn');
+    await act(async () => {
+      registerBtn.click();
+    });
+
+    expect(axios.post).toHaveBeenCalledWith('/auth/register', { nickName: 'NewTester' });
+    const storedUser = JSON.parse(window.localStorage.getItem('user_info') || '{}');
+    expect(storedUser.accountId).toBe(99);
+    expect(storedUser.uuid).toBe('test-uuid-reg');
+  });
+
+  it('should restore legacy user without accountId from localStorage safely', () => {
+    window.localStorage.setItem('token', 'legacy-token');
+    window.localStorage.setItem('user_info', JSON.stringify({ uuid: 'legacy-uuid', nickName: 'OldUser' }));
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    expect(screen.getByTestId('is-authenticated')).toHaveTextContent('true');
+    expect(screen.getByTestId('user-uuid')).toHaveTextContent('legacy-uuid');
+  });
 });

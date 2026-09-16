@@ -124,4 +124,24 @@ describe('Profile Component', () => {
     );
     expect(container.firstChild).toBeNull();
   });
+
+  it('renders Account ID: N/A and shows error on sendMail when accountId is missing', async () => {
+    const userWithoutAccountId = { uuid: 'test-uuid-legacy', nickName: 'LegacyUser' };
+    render(
+      <AuthContext.Provider value={{ ...mockAuthValue, user: userWithoutAccountId }}>
+        <Profile />
+      </AuthContext.Provider>
+    );
+    expect(screen.getByText('Account ID: N/A')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('메일 제목'), { target: { value: 'Title' } });
+    fireEvent.change(screen.getByPlaceholderText('메일 내용'), { target: { value: 'Body' } });
+    const mailForm = document.querySelector('.mail-form') as HTMLFormElement;
+    await act(async () => {
+      fireEvent.submit(mailForm);
+    });
+
+    expect(screen.getByText('계정 정보가 올바르지 않습니다.')).toBeInTheDocument();
+    expect(sendMail).not.toHaveBeenCalled();
+  });
 });

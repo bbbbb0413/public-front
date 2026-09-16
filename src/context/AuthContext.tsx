@@ -36,9 +36,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const storeAuthData = (newToken: string, uuid: string, nickName: string) => {
+  const storeAuthData = (newToken: string, uuid: string, nickName: string, accountId?: number) => {
     localStorage.setItem('token', newToken);
-    const userInfo: User = { uuid, nickName };
+    const userInfo: User = { uuid, nickName, accountId };
     localStorage.setItem('user_info', JSON.stringify(userInfo));
     setUser(userInfo);
     setToken(newToken);
@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const data = await apiLogin(uuid);
       if (!data.token) throw new Error('No token provided');
-      storeAuthData(data.token, data.uuid, data.nickName);
+      storeAuthData(data.token, data.uuid, data.nickName, data.accountId);
     } catch (error) {
       throw error;
     }
@@ -58,7 +58,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const data = await apiRegister(nickName);
       if (!data.token) throw new Error('No token provided');
-      storeAuthData(data.token, data.uuid, data.nickName);
+      storeAuthData(data.token, data.uuid, data.nickName, data.accountId);
     } catch (error) {
       throw error;
     }
