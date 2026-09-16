@@ -454,7 +454,7 @@ export const AiService = () => {
         onProgress: (data) => {
           if (data.step || data.progress !== undefined) {
             const stepLabel = (data.step && STEP_LABELS[data.step]) || data.step || '처리 중';
-            const percentText = data.progress !== undefined ? ` (${data.progress}%)` : '';
+            const percentText = data.progress ? ` (${data.progress}%)` : '';
             setUploadProgressText(`${stepLabel}${percentText}`);
           }
         },

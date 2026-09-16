@@ -2906,12 +2906,29 @@ describe('AiService Component', () => {
 
       expect(screen.getByText('업로드 중...')).toBeInTheDocument();
 
-      // progress 이벤트 수신 시뮬레이션
+      // progress 이벤트 수신 시뮬레이션: extract
       await act(async () => {
-        capturedCallbacks.onProgress?.({ step: 'chunk', progress: 40 });
+        capturedCallbacks.onProgress?.({ step: 'extract', progress: 20 });
       });
+      expect(screen.getByText('텍스트 추출 중 (20%)')).toBeInTheDocument();
 
-      expect(screen.getByText('청크 분할 중 (40%)')).toBeInTheDocument();
+      // progress 이벤트 수신 시뮬레이션: chunk
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'chunk', progress: 45 });
+      });
+      expect(screen.getByText('청크 분할 중 (45%)')).toBeInTheDocument();
+
+      // progress 이벤트 수신 시뮬레이션: embed
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'embed', progress: 70 });
+      });
+      expect(screen.getByText('임베딩 생성 중 (70%)')).toBeInTheDocument();
+
+      // progress 이벤트 수신 시뮬레이션: index
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'index', progress: 90 });
+      });
+      expect(screen.getByText('색인 저장 중 (90%)')).toBeInTheDocument();
 
       // done 이벤트 발생
       await act(async () => {
@@ -2920,7 +2937,46 @@ describe('AiService Component', () => {
 
       expect(screen.getByText('문서 업로드')).toBeInTheDocument();
     });
+
+    it('Given 진행률 이벤트의 progress 필드가 0이거나 누락된 경우 When progress 이벤트를 수신하면 Then 퍼센트 없이 단계 라벨만 정상 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-boundary-progress' });
+
+      let capturedCallbacks: {
+        onDone?: () => void;
+        onError?: (error: string) => void;
+        onProgress?: (data: { step?: string; progress?: number }) => void;
+      } = {};
+      vi.mocked(aiApi.subscribeIngestJob).mockImplementation((_jobId, callbacks) => {
+        capturedCallbacks = callbacks;
+        return vi.fn();
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const file = new File(['test data'], 'test.pdf', { type: 'application/pdf' });
+      const fileInput = screen.getByLabelText('file-upload-input');
+
+      await act(async () => {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+      });
+
+      // progress가 0인 경우
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'extract', progress: 0 });
+      });
+      expect(screen.getByText('텍스트 추출 중')).toBeInTheDocument();
+
+      // progress가 누락된 경우
+      await act(async () => {
+        capturedCallbacks.onProgress?.({ step: 'chunk' });
+      });
+      expect(screen.getByText('청크 분할 중')).toBeInTheDocument();
+    });
   });
+
 
   describe('Personal Prompt Management (SPEC-026)', () => {
     it('Given AI 설정 모달을 열었을 때 When 활성 프롬프트와 목록을 불러오면 Then 활성 프롬프트와 저장된 슬롯 목록(최대 10개)이 렌더링된다', async () => {
