@@ -1,4 +1,4 @@
-import client from './client';
+import adminClient from './adminClient';
 
 export interface Prompt {
   id: string;
@@ -28,7 +28,7 @@ export const createPrompt = async (
   userId?: string,
 ): Promise<Prompt> => {
   const variables = [...new Set(Array.from(content.matchAll(/\{\{(\w+)\}\}/g), (m) => m[1]))];
-  const res = await client.post('/ai/prompts', { name, content, variables, userId });
+  const res = await adminClient.post('/ai/prompts', { name, content, variables, userId });
   return res.data;
 };
 
@@ -39,32 +39,32 @@ export const createUserPrompt = async (
 ): Promise<Prompt> => createPrompt(name, content, userId);
 
 export const getUserActivePrompt = async (name: string, userId: string): Promise<Prompt> => {
-  const res = await client.get(`/ai/prompts/${name}/active`, { params: { userId } });
+  const res = await adminClient.get(`/ai/prompts/${name}/active`, { params: { userId } });
   return res.data;
 };
 
 export const getPromptVersions = async (name: string): Promise<Prompt[]> => {
-  const res = await client.get(`/ai/prompts/${name}`);
+  const res = await adminClient.get(`/ai/prompts/${name}`);
   return res.data ?? [];
 };
 
 export const getActivePrompt = async (name: string): Promise<Prompt> => {
-  const res = await client.get(`/ai/prompts/${name}/active`);
+  const res = await adminClient.get(`/ai/prompts/${name}/active`);
   return res.data;
 };
 
 export const activatePromptVersion = async (name: string, version: number): Promise<Prompt> => {
-  const res = await client.patch(`/ai/prompts/${name}/${version}/activate`);
+  const res = await adminClient.patch(`/ai/prompts/${name}/${version}/activate`);
   return res.data;
 };
 
 export const getLlmCosts = async (): Promise<LlmCost[]> => {
-  const res = await client.get('/ai/llm-gateway/costs');
+  const res = await adminClient.get('/ai/llm-gateway/costs');
   return res.data?.items ?? [];
 };
 
 export const getCircuitBreakers = async (): Promise<CircuitBreaker[]> => {
-  const res = await client.get('/ai/llm-gateway/breakers');
+  const res = await adminClient.get('/ai/llm-gateway/breakers');
   return res.data ?? [];
 };
 
@@ -78,6 +78,6 @@ export interface RagasEval {
 }
 
 export const getRagasEvals = async (limit = 20): Promise<RagasEval[]> => {
-  const res = await client.get('/ai/observability/ragas-evals', { params: { limit } });
+  const res = await adminClient.get('/ai/observability/ragas-evals', { params: { limit } });
   return res.data?.data ?? [];
 };
