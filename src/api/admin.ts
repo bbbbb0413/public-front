@@ -1,28 +1,6 @@
-import axios from 'axios';
-import { GATEWAY_BASE_URL } from '../utils/gateway-url';
+import adminClient from './adminClient';
 
-// admin API는 gateway를 거쳐 admin-server(gRPC)로 프록시된다.
-const identityClient = axios.create({
-  baseURL: GATEWAY_BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-identityClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('admin_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-identityClient.interceptors.response.use(
-  (res) => res,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('admin_token');
-      localStorage.removeItem('admin_info');
-    }
-    return Promise.reject(error);
-  },
-);
+const identityClient = adminClient;
 
 export interface AdminUser {
   id: number;

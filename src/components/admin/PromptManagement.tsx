@@ -30,11 +30,11 @@ export const PromptManagement = () => {
 
   const [detailPrompt, setDetailPrompt] = useState<Prompt | null>(null);
 
-  const handleSearch = async () => {
+  const handleSearch = async (preserveSuccessMsg = false) => {
     if (!searchName.trim()) return;
     setLoading(true);
     setError('');
-    setSuccessMsg('');
+    if (!preserveSuccessMsg) setSuccessMsg('');
     try {
       const [versionList, active] = await Promise.all([
         getPromptVersions(searchName),
@@ -53,7 +53,7 @@ export const PromptManagement = () => {
     try {
       await activatePromptVersion(prompt.name, prompt.version);
       setSuccessMsg(`v${prompt.version} 활성화 완료`);
-      handleSearch();
+      handleSearch(true);
     } catch {
       setError('활성화에 실패했습니다.');
     }
@@ -87,7 +87,7 @@ export const PromptManagement = () => {
       await createPrompt(createName, createContent);
       setSuccessMsg(`프롬프트 "${createName}" 생성 완료`);
       setCreateContent('');
-      if (searchName === createName) handleSearch();
+      if (searchName === createName) handleSearch(true);
     } catch {
       setError('프롬프트 생성에 실패했습니다.');
     } finally {
@@ -128,7 +128,7 @@ export const PromptManagement = () => {
               style={{ flex: 1, padding: '9px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f1f5f9', fontSize: 13 }}
             />
             <button
-              onClick={handleSearch}
+              onClick={() => handleSearch()}
               disabled={loading}
               style={{ padding: '9px 16px', background: '#6366f1', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 13 }}
             >
