@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getLlmCosts, getCircuitBreakers, LlmCost, CircuitBreaker } from '../../api/aiAdmin';
-
-const stateColor: Record<string, { bg: string; text: string }> = {
-  CLOSED: { bg: '#052e16', text: '#86efac' },
-  OPEN: { bg: '#450a0a', text: '#fca5a5' },
-  HALF_OPEN: { bg: '#431407', text: '#fed7aa' },
-};
+import {
+  normalizeCircuitBreakerStatus,
+  getCircuitBreakerStatusColor,
+} from '../../utils/circuit-breaker';
 
 export const LlmMonitor = () => {
   const [costs, setCosts] = useState<LlmCost[]>([]);
@@ -92,13 +90,14 @@ export const LlmMonitor = () => {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
               {breakers.map(b => {
-                const colors = stateColor[b.status] ?? stateColor.CLOSED;
+                const normalizedStatus = normalizeCircuitBreakerStatus(b.status);
+                const colors = getCircuitBreakerStatusColor(b.status);
                 return (
                   <div key={b.model} style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                       <span style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 14 }}>{b.model}</span>
                       <span style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: colors.bg, color: colors.text }}>
-                        {b.status}
+                        {normalizedStatus}
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: 16 }}>

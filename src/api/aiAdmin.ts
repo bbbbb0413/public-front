@@ -15,9 +15,18 @@ export interface LlmCost {
   totalCostUsd: number;
 }
 
+export type CircuitBreakerStatus =
+  | 'CLOSED'
+  | 'OPEN'
+  | 'HALF_OPEN'
+  | 'closed'
+  | 'open'
+  | 'half-open'
+  | (string & {});
+
 export interface CircuitBreaker {
   model: string;
-  status: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  status: CircuitBreakerStatus;
   failureCount: number;
   openedAt: string | null;
 }
