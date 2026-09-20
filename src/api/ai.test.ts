@@ -605,7 +605,7 @@ describe('AI Service API (Gateway 경유)', () => {
 
     const mockChunks = [
       'id: 1\ndata: {"type":"token","data":"응답 완료"}\n\n',
-      'id: 2\ndata: {"type":"done","data":{"confidence":0.85,"missing":["추가 설명"]}}\n\n',
+      'id: 2\ndata: {"type":"done","data":{"confidence":0.85,"missing":["추가 설명"],"iterations":2}}\n\n',
     ];
 
     const stream = new ReadableStream({
@@ -629,6 +629,7 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onDone).toHaveBeenCalledWith({
       confidence: 0.85,
       missing: ['추가 설명'],
+      iterations: 2,
     });
   });
 
@@ -640,7 +641,7 @@ describe('AI Service API (Gateway 경유)', () => {
     mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-done-meta-str' } });
 
     const mockChunks = [
-      'id: 1\ndata: {"type":"done","data":"{\\"confidence\\":0.9,\\"missing\\":[]}"}\n\n',
+      'id: 1\ndata: {"type":"done","data":"{\\"confidence\\":0.9,\\"missing\\":[],\\"iterations\\":3}"}\n\n',
     ];
 
     const stream = new ReadableStream({
@@ -664,6 +665,7 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onDone).toHaveBeenCalledWith({
       confidence: 0.9,
       missing: [],
+      iterations: 3,
     });
   });
 

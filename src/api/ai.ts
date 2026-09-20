@@ -302,6 +302,7 @@ export interface SessionTurn {
   sources?: SourceRef[];
   confidence?: number;
   missing?: string[];
+  iterations?: number;
 }
 
 export interface SessionDetailOut {
@@ -425,10 +426,16 @@ export interface AskQuestionStreamHandle extends Promise<void> {
   cancel?: () => Promise<void>;
 }
 
+export interface AskDoneMeta {
+  confidence?: number;
+  missing?: string[];
+  iterations?: number;
+}
+
 export const askQuestionStream = (
   question: string,
   onMessage: (text: string) => void,
-  onDone: (finalMeta?: { confidence?: number; missing?: string[] }) => void,
+  onDone: (finalMeta?: AskDoneMeta) => void,
   onError: (err: unknown) => void,
   _userId?: string | null,
   chatLog?: Array<{ sender: string; text: string }>,
@@ -503,7 +510,7 @@ export const askQuestionStream = (
           onMessage(event.data as string);
         } else if (event.type === 'done') {
           completed = true;
-          let finalMeta: { confidence?: number; missing?: string[] } | undefined = undefined;
+          let finalMeta: AskDoneMeta | undefined = undefined;
           if (event.data) {
             if (typeof event.data === 'string') {
               try {
@@ -512,7 +519,7 @@ export const askQuestionStream = (
                 // 파싱 실패 시 무시
               }
             } else if (typeof event.data === 'object') {
-              finalMeta = event.data as { confidence?: number; missing?: string[] };
+              finalMeta = event.data as AskDoneMeta;
             }
           }
           onDone(finalMeta);
