@@ -52,6 +52,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  sources?: SourceRef[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -325,6 +326,7 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        sources: t.sources,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
@@ -661,6 +663,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
+    let accumulatedSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -673,7 +676,10 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
+        setChatLog((prev) => [
+          ...prev,
+          { sender: 'ai', text: accumulated, confidence, missing, sources: accumulatedSources },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
@@ -690,7 +696,10 @@ export const AiService = () => {
       },
       userId,
       prevChatLog,
-      (sources) => setCurrentSources(sources),
+      (sources) => {
+        accumulatedSources = sources;
+        setCurrentSources(sources);
+      },
       sessionId,
       (newId) => setSessionId(newId),
       (progress) => {
@@ -1090,17 +1099,39 @@ export const AiService = () => {
                     질문을 입력하면 등록된 지식베이스 문서를 바탕으로 AI가 답변합니다.
                   </div>
                 )}
-                {chatLog.map((msg, idx) => (
-                  <div key={idx} className={`chat-message ${msg.sender}`}>
-                    <div className="message-bubble">
-                      {msg.sender === 'ai' ? (
-                        <>
-                          <ReactMarkdown
-                            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                          >
-                            {msg.text}
-                          </ReactMarkdown>
+                {chatLog.map((msg, idx) => {
+                  const isUngrounded =
+                    msg.sender === 'ai' &&
+                    (!msg.sources || msg.sources.length === 0) &&
+                    (msg.confidence === 0 ||
+                      (Boolean(msg.missing?.length) &&
+                        msg.missing!.some(
+                          (item) =>
+                            item.includes('지식베이스') ||
+                            item.includes('문서') ||
+                            item.includes('미발견'),
+                        )));
+
+                  return (
+                    <div key={idx} className={`chat-message ${msg.sender}`}>
+                      <div className="message-bubble">
+                        {msg.sender === 'ai' ? (
+                          <>
+                            {isUngrounded && (
+                              <div
+                                className="ungrounded-warning"
+                                data-testid="ungrounded-warning"
+                                role="alert"
+                              >
+                                근거 문서 미발견 (모델 일반 지식 기반 답변)
+                              </div>
+                            )}
+                            <ReactMarkdown
+                              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                            >
+                              {msg.text}
+                            </ReactMarkdown>
                           {msg.confidence !== undefined && (() => {
                             const confLevel =
                               msg.confidence >= 0.8
@@ -1163,7 +1194,8 @@ export const AiService = () => {
                       )}
                     </div>
                   </div>
-                ))}
+                );
+              })}
                 {isStreaming && (
                   <div className="chat-message ai">
                     <div className="message-bubble streaming">
