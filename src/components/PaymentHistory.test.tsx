@@ -146,6 +146,73 @@ describe('PaymentHistory Component', () => {
     expect(screen.getByRole('button', { name: '이전' })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
     expect(screen.getByText('gold_21')).toBeInTheDocument();
+
+    // 2페이지에서 이전 버튼 클릭 시 1페이지로 다시 이동
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: Array.from({ length: 20 }, (_, i) => ({
+            paymentId: i + 1,
+            accountId: 42,
+            amount: 1000,
+            currency: 'KRW',
+            productId: `gold_${i + 1}`,
+            status: 'COMPLETED',
+            createdAt: '2026-09-12T14:30:00.000Z',
+          })),
+          page: 1,
+          take: 20,
+          itemCount: 25,
+          pageCount: 2,
+          hasPreviousPage: false,
+          hasNextPage: true,
+        },
+      },
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: '이전' }).click();
+    });
+
+    await waitFor(() => {
+      expect(axios.get).toHaveBeenCalledWith('/payments', { params: { page: 1, take: 20 } });
+    });
+
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '이전' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음' })).not.toBeDisabled();
+  });
+
+  it('safely handles invalid date format and renders fallback dash', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: [
+            {
+              paymentId: 103,
+              accountId: 42,
+              amount: 3000,
+              currency: 'KRW',
+              productId: 'gold_300',
+              status: 'COMPLETED',
+              createdAt: 'invalid-date-format',
+            },
+          ],
+          page: 1,
+          take: 20,
+          itemCount: 1,
+          pageCount: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+        },
+      },
+    });
+
+    render(<PaymentHistory />);
+
+    await waitFor(() => expect(screen.getByText('103')).toBeInTheDocument());
+    expect(screen.getByText('결제 일시')).toBeInTheDocument();
+    expect(screen.getByText('-')).toBeInTheDocument();
   });
 
   it('shows an empty state when there are no payments', async () => {
