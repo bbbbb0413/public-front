@@ -10,6 +10,7 @@ export interface PaymentReply {
   currency: string;
   productId: string;
   status: string;
+  createdAt: string;
 }
 
 export interface PaymentListReply {
