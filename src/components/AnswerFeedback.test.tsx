@@ -128,4 +128,53 @@ describe('AnswerFeedback', () => {
       expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument(),
     );
   });
+
+  it('초기 마운트 시 existing이 없다가 비동기로 주입된 후 수정을 누르면 기존 평가가 채워진 채로 열리고 버튼이 활성화된다', () => {
+    const { rerender } = render(<AnswerFeedback onSubmit={vi.fn()} />);
+
+    expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+
+    rerender(<AnswerFeedback existing={existing} onSubmit={vi.fn()} />);
+
+    expect(screen.getByTestId('feedback-summary')).toHaveTextContent(
+      '정확도 4/5 · 유용성 5/5',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /수정/ }));
+
+    expect(screen.getByLabelText(/^정확도 4점/)).toBeChecked();
+    expect(screen.getByLabelText(/^유용성 5점/)).toBeChecked();
+    expect(screen.getByRole('textbox')).toHaveValue('근거가 좋았다');
+    expect(screen.getByText('평가 수정')).toBeEnabled();
+  });
+
+  it('수정 폼에서 값을 변경하다가 취소하고 다시 수정을 열면 기존 값으로 복원된다', () => {
+    render(<AnswerFeedback existing={existing} onSubmit={vi.fn()} />);
+    open();
+
+    pick('정확도', 2);
+    pick('유용성', 2);
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: '수정하려던 내용' },
+    });
+
+    fireEvent.click(screen.getByText('취소'));
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    open();
+
+    expect(screen.getByLabelText(/^정확도 4점/)).toBeChecked();
+    expect(screen.getByLabelText(/^유용성 5점/)).toBeChecked();
+    expect(screen.getByRole('textbox')).toHaveValue('근거가 좋았다');
+  });
+
+  it('신규 답변에서 평가하기를 열었을 때 초기 상태가 빈 값이고 제출 버튼이 비활성화된다', () => {
+    render(<AnswerFeedback onSubmit={vi.fn()} />);
+    open();
+
+    expect(screen.queryByRole('radio', { checked: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.getByText('평가 제출')).toBeDisabled();
+  });
 });
