@@ -1029,6 +1029,31 @@
   color: hsl(210, 20%, 88%);
 }
 
+.ungrounded-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 0.65rem;
+}
+
+.ungrounded-warning-icon {
+  font-size: 0.95rem;
+  color: #f87171;
+  flex-shrink: 0;
+}
+
+.ungrounded-warning-text {
+  line-height: 1.4;
+  color: #fca5a5;
+}
+
 .confidence-badge {
   display: inline-flex;
   align-items: center;

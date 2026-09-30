@@ -3682,6 +3682,231 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-054: 단발성 RAG 질의 신뢰도 산출 및 근거 문서 미참조 답변 경고 표시', () => {
+    it('Given 지식베이스 관련 문서가 검색되어 완료되었을 때 When 단발성 질문이 완료되면 Then 신뢰도 배지가 표시되고 경고 배너는 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
+        ) => {
+          onSources?.([
+            {
+              documentId: 'doc-1',
+              fileName: 'guide.pdf',
+              chunkIndex: 0,
+              score: 0.85,
+              snippet: '가이드 내용입니다.',
+            },
+          ]);
+          onMessage('가이드에 따른 답변입니다.');
+          onDone({
+            confidence: 0.85,
+            missing: [],
+          });
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '가이드 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('85%')).toBeInTheDocument();
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+    });
+
+    it('Given 검색 결과가 0건일 때 When 단발성 질문이 완료되면 Then 근거 문서 미발견 경고 배너와 0% 신뢰도 배지가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          onMessage('일반 상식 기반의 답변입니다.');
+          onDone({
+            confidence: 0.0,
+            missing: ['관련 지식베이스 문서를 찾지 못함'],
+          });
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문서 외 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('0%')).toBeInTheDocument();
+      expect(screen.getByTestId('missing-info')).toHaveTextContent('관련 지식베이스 문서를 찾지 못함');
+    });
+
+    it('Given 근거 문서가 미발견된 과거 대화 세션을 불러올 때 When 세션이 복원되면 Then AI 답변 버블에 경고 배너와 신뢰도 배지가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockAuth = {
+        user: { uuid: 'test-user-1', email: 'test@example.com', nickname: 'tester', role: 'user' },
+        token: 'mock-token',
+        isAuthenticated: true,
+        login: vi.fn(),
+        logout: vi.fn(),
+        register: vi.fn(),
+        refreshUser: vi.fn(),
+      };
+
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-ungrounded',
+          title: '근거 없는 질문 세션',
+          isBookmarked: false,
+          updatedAt: '2026-10-01T00:00:00Z',
+        },
+      ]);
+
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-ungrounded',
+        title: '근거 없는 질문 세션',
+        turns: [
+          { role: 'user', content: '알 수 없는 내용 질문', createdAt: '2026-10-01T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '일반적인 설명입니다.',
+            createdAt: '2026-10-01T00:00:01Z',
+            confidence: 0.0,
+            missing: ['관련 지식베이스 문서를 찾지 못함'],
+            sources: [],
+          },
+        ],
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:01Z',
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('근거 없는 질문 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('0%')).toBeInTheDocument();
+    });
+
+    it('Given 출처 문서가 있는 과거 세션을 불러올 때 When 세션이 복원되면 Then 경고 배너가 표시되지 않고 신뢰도 배지만 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockAuth = {
+        user: { uuid: 'test-user-1', email: 'test@example.com', nickname: 'tester', role: 'user' },
+        token: 'mock-token',
+        isAuthenticated: true,
+        login: vi.fn(),
+        logout: vi.fn(),
+        register: vi.fn(),
+        refreshUser: vi.fn(),
+      };
+
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-grounded',
+          title: '근거 있는 질문 세션',
+          isBookmarked: false,
+          updatedAt: '2026-10-01T00:00:00Z',
+        },
+      ]);
+
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-grounded',
+        title: '근거 있는 질문 세션',
+        turns: [
+          { role: 'user', content: '매뉴얼 질문', createdAt: '2026-10-01T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '매뉴얼에 따른 답변입니다.',
+            createdAt: '2026-10-01T00:00:01Z',
+            confidence: 0.92,
+            missing: [],
+            sources: [
+              {
+                documentId: 'doc-1',
+                fileName: 'manual.pdf',
+                chunkIndex: 0,
+                score: 0.92,
+              },
+            ],
+          },
+        ],
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:01Z',
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('근거 있는 질문 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('92%')).toBeInTheDocument();
+    });
+  });
 });
 
 
