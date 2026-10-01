@@ -3682,6 +3682,176 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-055: 단발성 RAG 질의 신뢰도 산출 및 근거 문서 미참조 답변 경고 표시', () => {
+    it('AC 1: Given 사용자가 등록된 지식베이스 문서와 관련된 질문을 단순 질의로 요청했을 때 When 백엔드가 검색 청크(최고 유사도 0.85)를 기반으로 답변을 생성하고 완료 이벤트를 발행하면 Then 프론트엔드 AI 메시지 버블에 신뢰도 85% 녹색 배지(confidence-high)가 정상 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([
+            { fileName: 'policy.txt', chunkIndex: 0, documentId: 'doc-1', score: 0.85 },
+          ]);
+        }
+        setTimeout(() => onMessage('환불 규정은 규정에 따라 처리됩니다.'), 10);
+        setTimeout(() => onDone({ confidence: 0.85, missing: [] }), 20);
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      // 채팅 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '환불 규정이 어떻게 되나요?' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 신뢰도 85% 배지 확인
+      const confidenceBadge = screen.getByTestId('confidence-badge');
+      expect(confidenceBadge).toBeInTheDocument();
+      expect(confidenceBadge).toHaveClass('confidence-high');
+      expect(confidenceBadge.textContent).toContain('85%');
+
+      // 경고 배너는 표시되지 않아야 함
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+    });
+
+    it('AC 2: Given 지식베이스에 아무런 문서가 없거나 질문과 일치하는 검색 청크가 0건일 때 When 단순 RAG 질문을 전송하여 답변이 완료되면 Then 백엔드는 confidence: 0.0 및 missing: ["관련 지식베이스 문서를 찾지 못함"]을 발행하고, 프론트엔드 AI 메시지 상단에 "근거 문서 미발견 (모델 일반 지식 기반 답변)" 경고 배너가 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        setTimeout(() => onMessage('일반적인 상식에 기반한 답변입니다.'), 10);
+        setTimeout(
+          () =>
+            onDone({
+              confidence: 0.0,
+              missing: ['관련 지식베이스 문서를 찾지 못함'],
+            }),
+          20,
+        );
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문서 외의 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 경고 배너 렌더링 확인
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner.textContent).toContain('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+      expect(warningBanner).toHaveClass('ungrounded-warning-banner');
+
+      // 신뢰도 0% 및 missing 항목 렌더링 확인
+      const confidenceBadge = screen.getByTestId('confidence-badge');
+      expect(confidenceBadge).toBeInTheDocument();
+      expect(confidenceBadge).toHaveClass('confidence-low');
+      expect(confidenceBadge.textContent).toContain('0%');
+
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('관련 지식베이스 문서를 찾지 못함')).toBeInTheDocument();
+    });
+
+    it('AC 3: Given 과거에 단발성 질의로 저장된 대화 세션을 사이드바에서 선택하여 불러왔을 때 When 세션 상세 데이터가 로드되면 Then 각 AI 답변 메시지에 저장된 신뢰도 배지 및 근거 미참조 경고 배너가 원래 상태대로 복원되어 렌더링된다', async () => {
+      const mockAuth = {
+        user: { uuid: 'test-user-1', name: 'User 1', email: 'u1@test.com' },
+        token: 'token-1',
+        isAuthenticated: true,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+      };
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'session-past-1',
+          title: '과거 대화 세션',
+          isBookmarked: false,
+          updatedAt: '2026-10-01T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'session-past-1',
+        title: '과거 대화 세션',
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '단순 질문입니다.',
+            createdAt: '2026-10-01T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '근거가 없는 일반 답변입니다.',
+            createdAt: '2026-10-01T00:00:01Z',
+            confidence: 0.0,
+            missing: ['관련 지식베이스 문서를 찾지 못함'],
+            sources: [],
+          },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 사이드바 세션 클릭
+      const sessionItem = screen.getByText('과거 대화 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // Then: 복원된 메시지에서 경고 배너 및 신뢰도 배지 확인
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner.textContent).toContain('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+
+      const confidenceBadge = screen.getByTestId('confidence-badge');
+      expect(confidenceBadge).toBeInTheDocument();
+      expect(confidenceBadge.textContent).toContain('0%');
+    });
+  });
 });
 
 
