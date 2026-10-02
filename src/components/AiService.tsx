@@ -52,6 +52,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  sources?: SourceRef[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -227,10 +228,10 @@ export const AiService = () => {
     }
   };
 
-  const toggleGroup = (documentId: string) => {
+  const toggleGroup = (groupKey: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
-      [documentId]: !prev[documentId],
+      [groupKey]: !prev[groupKey],
     }));
   };
 
@@ -261,6 +262,87 @@ export const AiService = () => {
         chunks: [...group.chunks].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)),
       }))
       .sort((a, b) => (b.maxScore ?? -Infinity) - (a.maxScore ?? -Infinity));
+  };
+
+  const renderSourceRefs = (sources: SourceRef[], keyPrefix: string | number) => {
+    if (!sources || sources.length === 0) return null;
+    return (
+      <div className="source-refs">
+        <span className="source-refs-label">참고 문서</span>
+        <ul className="source-refs-list">
+          {groupSourcesByDocument(sources).map((group) => {
+            const groupKey = `${keyPrefix}-${group.documentId}`;
+            const isExpanded = !!expandedGroups[groupKey] || !!expandedGroups[group.documentId];
+            return (
+              <li key={group.documentId} className="source-ref-item-container">
+                <button
+                  type="button"
+                  className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
+                  onClick={() => toggleGroup(groupKey)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleGroup(groupKey);
+                    }
+                  }}
+                  aria-expanded={isExpanded}
+                >
+                  <span className="source-ref-name">{group.fileName}</span>
+                  <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
+                  {typeof group.maxScore === 'number' && (
+                    <span className="source-ref-score">
+                      최고 관련도 {Math.round(group.maxScore * 100)}%
+                    </span>
+                  )}
+                  <span className="source-ref-toggle-icon" aria-hidden="true">
+                    {isExpanded ? '▲' : '▼'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="source-ref-view-btn"
+                  onClick={() => handleViewSourceFile(group.documentId)}
+                  disabled={viewingFileId === group.documentId}
+                >
+                  {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
+                </button>
+                {isExpanded && (
+                  <ul className="source-group-chunks">
+                    {group.chunks.map((chunk) => (
+                      <li key={chunk.chunkIndex} className="source-chunk-item">
+                        <div className="source-chunk-meta">
+                          <span className="source-ref-chunk">
+                            청크 {chunk.chunkIndex}
+                          </span>
+                          {typeof chunk.score === 'number' && (
+                            <span className="source-ref-score">
+                              관련도 {Math.round(chunk.score * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        {chunk.snippet && (
+                          <div
+                            className="source-ref-snippet"
+                            data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
+                          >
+                            {chunk.snippet}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {fileViewError && (
+          <div className="source-ref-file-error" role="alert">
+            {fileViewError}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleViewSourceFile = async (documentId: string) => {
@@ -325,15 +407,13 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        sources: t.sources,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
       setStreamingAnswer('');
       streamingAnswerRef.current = '';
-      const lastAiTurnWithSources = [...detail.turns]
-        .reverse()
-        .find((t) => t.role === 'assistant' && t.sources && t.sources.length > 0);
-      setCurrentSources(lastAiTurnWithSources?.sources ?? []);
+      setCurrentSources([]);
       setExpandedGroups({});
       setCurrentProgress(null);
       setCopiedIndex(null);
@@ -661,6 +741,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
+    let turnSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -673,9 +754,19 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated,
+            confidence,
+            missing,
+            sources: turnSources.length > 0 ? turnSources : undefined,
+          },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
+        setCurrentSources([]);
         setCurrentProgress(null);
         setIsStreaming(false);
         if (userId) fetchSessions();
@@ -685,12 +776,16 @@ export const AiService = () => {
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
+        setCurrentSources([]);
         setCurrentProgress(null);
         setIsStreaming(false);
       },
       userId,
       prevChatLog,
-      (sources) => setCurrentSources(sources),
+      (sources) => {
+        turnSources = sources;
+        setCurrentSources(sources);
+      },
       sessionId,
       (newId) => setSessionId(newId),
       (progress) => {
@@ -1130,6 +1225,7 @@ export const AiService = () => {
                               </ul>
                             </div>
                           )}
+                          {msg.sources && msg.sources.length > 0 && renderSourceRefs(msg.sources, idx)}
                           <div className="message-actions">
                             {sessionId && (
                               <button
@@ -1191,83 +1287,8 @@ export const AiService = () => {
                       ) : (
                         !currentProgress && <span className="cursor">|</span>
                       )}
+                      {currentSources.length > 0 && renderSourceRefs(currentSources, 'streaming')}
                     </div>
-                  </div>
-                )}
-                {!isStreaming && currentSources.length > 0 && (
-                  <div className="source-refs">
-                    <span className="source-refs-label">참고 문서</span>
-                    <ul className="source-refs-list">
-                      {groupSourcesByDocument(currentSources).map((group) => {
-                        const isExpanded = !!expandedGroups[group.documentId];
-                        return (
-                          <li key={group.documentId} className="source-ref-item-container">
-                            <button
-                              type="button"
-                              className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
-                              onClick={() => toggleGroup(group.documentId)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  toggleGroup(group.documentId);
-                                }
-                              }}
-                              aria-expanded={isExpanded}
-                            >
-                              <span className="source-ref-name">{group.fileName}</span>
-                              <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
-                              {typeof group.maxScore === 'number' && (
-                                <span className="source-ref-score">
-                                  최고 관련도 {Math.round(group.maxScore * 100)}%
-                                </span>
-                              )}
-                              <span className="source-ref-toggle-icon" aria-hidden="true">
-                                {isExpanded ? '▲' : '▼'}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              className="source-ref-view-btn"
-                              onClick={() => handleViewSourceFile(group.documentId)}
-                              disabled={viewingFileId === group.documentId}
-                            >
-                              {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
-                            </button>
-                            {isExpanded && (
-                              <ul className="source-group-chunks">
-                                {group.chunks.map((chunk) => (
-                                  <li key={chunk.chunkIndex} className="source-chunk-item">
-                                    <div className="source-chunk-meta">
-                                      <span className="source-ref-chunk">
-                                        청크 {chunk.chunkIndex}
-                                      </span>
-                                      {typeof chunk.score === 'number' && (
-                                        <span className="source-ref-score">
-                                          관련도 {Math.round(chunk.score * 100)}%
-                                        </span>
-                                      )}
-                                    </div>
-                                    {chunk.snippet && (
-                                      <div
-                                        className="source-ref-snippet"
-                                        data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
-                                      >
-                                        {chunk.snippet}
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    {fileViewError && (
-                      <div className="source-ref-file-error" role="alert">
-                        {fileViewError}
-                      </div>
-                    )}
                   </div>
                 )}
                 <div ref={messagesEndRef} />

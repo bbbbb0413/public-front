@@ -1856,7 +1856,7 @@ describe('AiService Component', () => {
       expect(screen.queryByText('참고 문서')).not.toBeInTheDocument();
     });
 
-    it('Given 여러 턴의 대화가 있는 세션 When 복원하면 Then 마지막 AI 턴의 출처가 참고 문서 영역에 복원된다', async () => {
+    it('Given 여러 턴의 대화가 있는 세션 When 복원하면 Then 각 AI 턴의 출처가 각 메시지 버블에 개별 복원된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([
         { sessionId: 'sess-multi', title: '멀티턴 세션', updatedAt: '2026-08-25T01:00:00Z' },
@@ -1922,9 +1922,9 @@ describe('AiService Component', () => {
       expect(screen.getByText('80%')).toBeInTheDocument();
       expect(screen.getByText('95%')).toBeInTheDocument();
 
-      // 마지막 AI 턴의 출처가 표시되고 이전 AI 턴의 출처는 참고 문서 목록에 노출되지 않음
+      // 각 AI 턴의 출처가 각 메시지 버블에 모두 정상 복원되어 표시됨
+      expect(screen.getByText('turn1_doc.pdf')).toBeInTheDocument();
       expect(screen.getByText('turn2_doc.pdf')).toBeInTheDocument();
-      expect(screen.queryByText('turn1_doc.pdf')).not.toBeInTheDocument();
     });
 
     it('Given 사용자가 질문만 입력하고 백엔드 처리가 중단되거나 출처 검색 결과가 0건인 대화 턴 When 세션을 저장 및 복원하면 Then sources 가 빈 배열 또는 undefined 로 안전하게 처리된다', async () => {
@@ -3682,6 +3682,277 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('Turn-level Source Citations (SPEC-056)', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-1', email: 'test@example.com', nickName: '테스터' },
+      token: 'mock-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 사용자가 지식베이스 문서를 업로드하고 첫 번째 질문을 완료했을 때 When 답변 생성이 완료되면 Then 해당 AI 메시지 버블 하단에 참고 문서 목록 및 근거 청크 수가 올바르게 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'guide.pdf', chunkIndex: 0, documentId: 'doc-guide', snippet: '가이드 내용입니다.', score: 0.95 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        onSources?.(mockSources);
+        onMessage('첫 번째 답변 내용');
+        onDone();
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '가이드 알려줘' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const aiMessage = document.querySelector('.chat-message.ai');
+      expect(aiMessage).toBeInTheDocument();
+      expect(aiMessage?.querySelector('.source-refs')).toBeInTheDocument();
+      expect(aiMessage?.textContent).toContain('guide.pdf');
+      expect(aiMessage?.textContent).toContain('근거 1건');
+    });
+
+    it('Given 첫 번째 질문에 대한 답변과 출처가 표시된 상태에서 When 사용자가 두 번째 후속 질문을 전송하고 새 답변을 받았을 때 Then 첫 번째 AI 메시지 버블의 참고 문서 목록이 그대로 유지되어 사라지지 않고, 두 번째 AI 메시지 버블에도 새 출처가 독립적으로 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const sources1: aiApi.SourceRef[] = [
+        { fileName: 'first.pdf', chunkIndex: 0, documentId: 'doc-1', snippet: '첫 번째 출처', score: 0.9 },
+      ];
+      const sources2: aiApi.SourceRef[] = [
+        { fileName: 'second.pdf', chunkIndex: 1, documentId: 'doc-2', snippet: '두 번째 출처', score: 0.8 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream)
+        .mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+          onSources?.(sources1);
+          onMessage('첫 번째 답변입니다.');
+          onDone();
+          return Promise.resolve();
+        })
+        .mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+          onSources?.(sources2);
+          onMessage('두 번째 답변입니다.');
+          onDone();
+          return Promise.resolve();
+        });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 첫 번째 질문
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 두 번째 질문
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const aiMessages = document.querySelectorAll('.chat-message.ai');
+      expect(aiMessages.length).toBe(2);
+
+      // 첫 번째 메시지 버블 내부에 first.pdf 출처 보존 확인
+      expect(aiMessages[0].querySelector('.source-refs')).toBeInTheDocument();
+      expect(aiMessages[0].textContent).toContain('first.pdf');
+
+      // 두 번째 메시지 버블 내부에 second.pdf 출처 렌더링 확인
+      expect(aiMessages[1].querySelector('.source-refs')).toBeInTheDocument();
+      expect(aiMessages[1].textContent).toContain('second.pdf');
+    });
+
+    it('Given 다중 턴 대화 이력이 저장된 세션이 존재할 때 When 세션 목록에서 해당 세션을 클릭하여 복원(handleLoadSession)하면 Then 대화창의 모든 과거 AI 답변 메시지에 각 턴에 해당하는 참고 문서 목록이 개별적으로 복원되어 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'multi-turn-sess', title: '다중 턴 세션', updatedAt: '2026-10-01T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'multi-turn-sess',
+        title: '다중 턴 세션',
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 1', createdAt: '2026-10-01T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변 1',
+            createdAt: '2026-10-01T00:00:01Z',
+            sources: [
+              { fileName: 'turn1_doc.pdf', chunkIndex: 0, documentId: 'd1', snippet: '턴1 내용' },
+            ],
+          },
+          { role: 'user', content: '질문 2', createdAt: '2026-10-01T00:00:02Z' },
+          {
+            role: 'assistant',
+            content: '답변 2',
+            createdAt: '2026-10-01T00:00:03Z',
+            sources: [
+              { fileName: 'turn2_doc.pdf', chunkIndex: 1, documentId: 'd2', snippet: '턴2 내용' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('다중 턴 세션'));
+      });
+
+      const aiMessages = document.querySelectorAll('.chat-message.ai');
+      expect(aiMessages.length).toBe(2);
+
+      // 각 AI 메시지에 해당 턴의 출처가 독립적으로 복원되어 렌더링되는지 확인
+      expect(aiMessages[0].textContent).toContain('turn1_doc.pdf');
+      expect(aiMessages[1].textContent).toContain('turn2_doc.pdf');
+    });
+
+    it('Given 검색된 지식베이스 문서가 없거나 단발성 일반 대화인 경우 (sources가 undefined이거나 빈 배열 []) When 답변 메시지가 렌더링될 때 Then 참고 문서 영역이 화면에 나타나지 않고 텍스트 및 기존 배지만 안전하게 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        onSources?.([]);
+        onMessage('일반 대화 답변입니다.');
+        onDone({ confidence: 0.9 });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '일반 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const aiMessage = document.querySelector('.chat-message.ai');
+      expect(aiMessage).toBeInTheDocument();
+      expect(aiMessage?.querySelector('.source-refs')).not.toBeInTheDocument();
+      expect(aiMessage?.textContent).toContain('일반 대화 답변입니다.');
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+    });
+
+    it('Given AI 메시지 버블 내부에 참고 문서 목록이 렌더링되었을 때 When 사용자가 특정 참고 문서의 "원문 보기" 버튼을 클릭하면 Then 해당 문서 ID로 getDocumentFile이 정상 호출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockBlob = new Blob(['sample content'], { type: 'text/plain' });
+      vi.mocked(aiApi.getDocumentFile).mockResolvedValue(mockBlob);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'source_doc.pdf', chunkIndex: 0, documentId: 'doc-target', snippet: '원문 테스트' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        onSources?.(mockSources);
+        onMessage('원문 보기 답변');
+        onDone();
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '원문 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const viewBtn = screen.getByRole('button', { name: /원문 보기/i });
+      expect(viewBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-target');
+    });
+  });
 });
+
 
 
