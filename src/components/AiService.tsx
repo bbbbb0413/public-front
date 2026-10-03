@@ -52,6 +52,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  sources?: SourceRef[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -325,6 +326,7 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        sources: t.sources,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
@@ -661,6 +663,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
+    let latestSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -673,7 +676,10 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
+        setChatLog((prev) => [
+          ...prev,
+          { sender: 'ai', text: accumulated, confidence, missing, sources: latestSources },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
@@ -690,7 +696,10 @@ export const AiService = () => {
       },
       userId,
       prevChatLog,
-      (sources) => setCurrentSources(sources),
+      (sources) => {
+        latestSources = sources;
+        setCurrentSources(sources);
+      },
       sessionId,
       (newId) => setSessionId(newId),
       (progress) => {
@@ -1101,6 +1110,27 @@ export const AiService = () => {
                           >
                             {msg.text}
                           </ReactMarkdown>
+                          {(() => {
+                            const isUngrounded =
+                              (!msg.sources || msg.sources.length === 0) &&
+                              (msg.confidence === 0 ||
+                                (msg.missing &&
+                                  msg.missing.some(
+                                    (item) =>
+                                      item.includes('찾지 못함') ||
+                                      item.includes('지식베이스') ||
+                                      item.includes('문서'),
+                                  )));
+                            if (!isUngrounded) return null;
+                            return (
+                              <div
+                                className="ungrounded-warning"
+                                data-testid="ungrounded-warning"
+                              >
+                                근거 문서 미발견 (모델 일반 지식 기반 답변)
+                              </div>
+                            );
+                          })()}
                           {msg.confidence !== undefined && (() => {
                             const confLevel =
                               msg.confidence >= 0.8
