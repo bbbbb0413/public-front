@@ -121,6 +121,8 @@ export const AiService = () => {
 
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const showBookmarkToast = (msg: string) => {
     setBookmarkSuccessMsg(msg);
@@ -342,14 +344,30 @@ export const AiService = () => {
     }
   };
 
-  const handleDeleteSession = async (sid: string, e: React.MouseEvent) => {
+  const handleDeleteSessionClick = (session: SessionOut, e: React.MouseEvent) => {
     e.stopPropagation();
+    setDeletingSession({ sessionId: session.sessionId, title: session.title });
+  };
+
+  const handleCancelDeleteSession = () => {
+    if (isDeletingSession) return;
+    setDeletingSession(null);
+  };
+
+  const handleConfirmDeleteSession = async () => {
+    if (!deletingSession || isDeletingSession) return;
+    const sid = deletingSession.sessionId;
+    setIsDeletingSession(true);
     try {
       await deleteSessionById(sid);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sid));
       if (sessionId === sid) handleNewChat();
+      setDeletingSession(null);
     } catch {
       setErrorMsg('세션 삭제에 실패했습니다.');
+      setDeletingSession(null);
+    } finally {
+      setIsDeletingSession(false);
     }
   };
 
@@ -493,6 +511,17 @@ export const AiService = () => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingDoc, isDeleting]);
+
+  useEffect(() => {
+    if (!deletingSession) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDeletingSession) {
+        setDeletingSession(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deletingSession, isDeletingSession]);
 
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
@@ -1018,8 +1047,8 @@ export const AiService = () => {
                             </button>
                             <button
                               className="btn-delete-session"
-                              onClick={(e) => handleDeleteSession(s.sessionId, e)}
-                              aria-label={`${s.title} 삭제`}
+                              onClick={(e) => handleDeleteSessionClick(s, e)}
+                              aria-label={s.title ? `${s.title} 삭제` : '세션 삭제'}
                               title="삭제"
                             >
                               ✕
@@ -1589,6 +1618,55 @@ export const AiService = () => {
                 disabled={isDeleting}
               >
                 {isDeleting ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 세션 삭제 확인 모달 (SPEC-058) */}
+      {deletingSession && (
+        <div
+          className="chat-modal-overlay"
+          data-testid="session-delete-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeletingSession) handleCancelDeleteSession();
+          }}
+          role="presentation"
+        >
+          <div
+            className="delete-confirm-modal session-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-delete-confirm-title"
+          >
+            <h3 id="session-delete-confirm-title" className="delete-confirm-title">
+              대화 삭제 확인
+            </h3>
+            <p className="delete-confirm-message">
+              {deletingSession.title
+                ? `"${deletingSession.title}" 대화를 삭제하시겠습니까?`
+                : '선택한 대화를 삭제하시겠습니까?'}
+            </p>
+            <p className="delete-confirm-warning">
+              삭제된 대화는 복구할 수 없으며 대화 기록에서 영구히 제거됩니다.
+            </p>
+            <div className="delete-confirm-actions">
+              <button
+                type="button"
+                className="btn-cancel-delete"
+                onClick={handleCancelDeleteSession}
+                disabled={isDeletingSession}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn-confirm-delete"
+                onClick={handleConfirmDeleteSession}
+                disabled={isDeletingSession}
+              >
+                {isDeletingSession ? '삭제 중...' : '삭제'}
               </button>
             </div>
           </div>
