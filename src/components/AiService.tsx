@@ -52,6 +52,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  sources?: SourceRef[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -325,6 +326,7 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        sources: t.sources,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
@@ -661,6 +663,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
+    let receivedSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -673,7 +676,16 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated,
+            confidence,
+            missing,
+            sources: receivedSources,
+          },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
@@ -690,7 +702,10 @@ export const AiService = () => {
       },
       userId,
       prevChatLog,
-      (sources) => setCurrentSources(sources),
+      (sources) => {
+        receivedSources = sources;
+        setCurrentSources(sources);
+      },
       sessionId,
       (newId) => setSessionId(newId),
       (progress) => {
@@ -1095,6 +1110,23 @@ export const AiService = () => {
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
                         <>
+                          {(() => {
+                            const isNoSources = !msg.sources || msg.sources.length === 0;
+                            const isUngrounded =
+                              isNoSources &&
+                              (msg.confidence === 0 || (msg.missing && msg.missing.length > 0));
+                            if (!isUngrounded) return null;
+                            return (
+                              <div className="ungrounded-warning" data-testid="ungrounded-warning">
+                                <span className="ungrounded-warning-icon" aria-hidden="true">
+                                  ⚠
+                                </span>
+                                <span className="ungrounded-warning-text">
+                                  근거 문서 미발견 (모델 일반 지식 기반 답변)
+                                </span>
+                              </div>
+                            );
+                          })()}
                           <ReactMarkdown
                             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                             rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
