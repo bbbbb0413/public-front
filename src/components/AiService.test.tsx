@@ -3682,6 +3682,104 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-061: 지식베이스 문서 목록 업로드 일시 표시 및 포맷팅 통일', () => {
+    it('AC 1: 문서 목록 테이블 헤더에 "업로드 일시" 컬럼이 표시되고 문서 행에 포맷팅된 일시가 렌더링된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-1',
+          fileName: 'guide.pdf',
+          status: 'processed',
+          chunkCount: 12,
+          createdAt: '2026-10-02 01:30:00',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs as any);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const table = screen.getByRole('table');
+      expect(table).toBeInTheDocument();
+
+      // 헤더 검증
+      const thUploadTime = screen.getByRole('columnheader', { name: '업로드 일시' });
+      expect(thUploadTime).toBeInTheDocument();
+
+      // 일시 텍스트 렌더링 검증
+      expect(screen.getByText('2026-10-02 01:30:00')).toBeInTheDocument();
+    });
+
+    it('AC 2: ISO 8601 형식의 createdAt이 formatDateTime을 거쳐 올바르게 렌더링된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-iso',
+          fileName: 'policy.docx',
+          status: 'processed',
+          chunkCount: 5,
+          createdAt: '2026-10-08 09:15:30',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs as any);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('2026-10-08 09:15:30')).toBeInTheDocument();
+    });
+
+    it('AC 3: createdAt이 없거나 빈 문자열, 유효하지 않은 값일 때 "-"로 안전하게 폴백된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-null',
+          fileName: 'legacy-null.pdf',
+          status: 'processed',
+          chunkCount: 2,
+          createdAt: null as any,
+        },
+        {
+          id: 'doc-empty',
+          fileName: 'legacy-empty.pdf',
+          status: 'processed',
+          chunkCount: 3,
+          createdAt: '',
+        },
+        {
+          id: 'doc-invalid',
+          fileName: 'legacy-invalid.pdf',
+          status: 'processed',
+          chunkCount: 1,
+          createdAt: 'invalid-date',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs as any);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const rows = screen.getAllByRole('row');
+      // 헤더 1개 + 데이터 3개 = 4행
+      expect(rows.length).toBe(4);
+
+      // 각 행에 폴백 기호 '-'가 렌더링되었는지 확인
+      const fallbackCells = screen.getAllByText('-');
+      expect(fallbackCells.length).toBe(3);
+    });
+
+    it('AC 4: 문서가 없는 빈 상태일 때 "업로드된 문서가 없습니다." 안내 문구가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('업로드된 문서가 없습니다.')).toBeInTheDocument();
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    });
+  });
 });
 
 

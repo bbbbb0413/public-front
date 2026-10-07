@@ -35,6 +35,7 @@ import {
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import { AnswerFeedback } from './AnswerFeedback';
+import { formatDateTime } from '../utils/date';
 import './AiService.css';
 
 interface DocumentInfo {
@@ -814,6 +815,7 @@ export const AiService = () => {
                     <th>파일명</th>
                     <th>상태</th>
                     <th>청크 수</th>
+                    <th>업로드 일시</th>
                     <th>작업</th>
                   </tr>
                 </thead>
@@ -836,6 +838,7 @@ export const AiService = () => {
                           <span className={`status-badge ${doc.status}`}>{statusContent}</span>
                         </td>
                         <td>{doc.chunkCount}</td>
+                        <td>{formatDateTime(doc.createdAt) || '-'}</td>
                         <td>
                           <div className="doc-actions">
                             {isFailed && (
