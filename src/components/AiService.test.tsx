@@ -3682,6 +3682,161 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-063 지식베이스 문서 목록 검색 필터링 및 업로드 일시 표시', () => {
+    const mockDocuments = [
+      {
+        id: 'doc-1',
+        fileName: 'guide.pdf',
+        status: 'processed',
+        chunkCount: 5,
+        createdAt: '2026-08-26T14:30:00.000Z',
+      },
+      {
+        id: 'doc-2',
+        fileName: 'Report_2026.pdf',
+        status: 'processed',
+        chunkCount: 8,
+        createdAt: '2026-08-27T09:15:30.000Z',
+      },
+      {
+        id: 'doc-3',
+        fileName: 'manual.md',
+        status: 'processed',
+        chunkCount: 2,
+        createdAt: '',
+      },
+      {
+        id: 'doc-4',
+        fileName: 'nodate.txt',
+        status: 'failed',
+        chunkCount: 0,
+        createdAt: undefined as unknown as string,
+      },
+    ];
+
+    it('AC 1 & AC 4: 검색창 placeholder와 문서 목록 테이블 헤더(업로드 일시) 및 formatDateTime 포맷팅이 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      // 문서 검색 입력창 존재 확인
+      const searchInput = screen.getByPlaceholderText('문서 검색...');
+      expect(searchInput).toBeInTheDocument();
+
+      // 테이블 헤더 "업로드 일시" 확인
+      expect(screen.getByRole('columnheader', { name: '업로드 일시' })).toBeInTheDocument();
+
+      // 포맷팅된 업로드 일시 확인 (doc-1: '2026-08-26 14:30:00', doc-2: '2026-08-27 09:15:30')
+      expect(screen.getByText('2026-08-26 14:30:00')).toBeInTheDocument();
+      expect(screen.getByText('2026-08-27 09:15:30')).toBeInTheDocument();
+    });
+
+    it('AC 1: 검색창에 "guide"를 입력하면 파일명에 "guide"가 포함된 문서만 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const searchInput = screen.getByPlaceholderText('문서 검색...');
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: 'guide' } });
+      });
+
+      expect(screen.getByText('guide.pdf')).toBeInTheDocument();
+      expect(screen.queryByText('Report_2026.pdf')).not.toBeInTheDocument();
+      expect(screen.queryByText('manual.md')).not.toBeInTheDocument();
+      expect(screen.queryByText('nodate.txt')).not.toBeInTheDocument();
+    });
+
+    it('AC 2: 대소문자 구분 없이 "report"를 입력하면 "Report_2026.pdf"가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const searchInput = screen.getByPlaceholderText('문서 검색...');
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: 'report' } });
+      });
+
+      expect(screen.getByText('Report_2026.pdf')).toBeInTheDocument();
+      expect(screen.queryByText('guide.pdf')).not.toBeInTheDocument();
+    });
+
+    it('AC 3: 일치하는 문서가 없는 키워드 입력 시 "검색된 문서가 없습니다." 안내 문구가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const searchInput = screen.getByPlaceholderText('문서 검색...');
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
+      });
+
+      expect(screen.getByText('검색된 문서가 없습니다.')).toBeInTheDocument();
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    });
+
+    it('검색창에 입력된 내용이 있을 때 검색어 지우기 버튼 또는 Escape 키로 초기화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const searchInput = screen.getByPlaceholderText('문서 검색...') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: 'guide' } });
+      });
+
+      expect(searchInput.value).toBe('guide');
+      expect(screen.getByText('guide.pdf')).toBeInTheDocument();
+      expect(screen.queryByText('manual.md')).not.toBeInTheDocument();
+
+      // 지우기 버튼 표시 확인 및 클릭
+      const clearBtn = screen.getByRole('button', { name: /문서 검색어 초기화/i });
+      expect(clearBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(clearBtn);
+      });
+
+      expect(searchInput.value).toBe('');
+      expect(screen.getByText('guide.pdf')).toBeInTheDocument();
+      expect(screen.getByText('manual.md')).toBeInTheDocument();
+
+      // Escape 키 입력 테스트
+      await act(async () => {
+        fireEvent.change(searchInput, { target: { value: 'manual' } });
+      });
+      expect(screen.queryByText('guide.pdf')).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(searchInput, { key: 'Escape', code: 'Escape' });
+      });
+      expect(searchInput.value).toBe('');
+      expect(screen.getByText('guide.pdf')).toBeInTheDocument();
+      expect(screen.getByText('manual.md')).toBeInTheDocument();
+    });
+
+    it('AC 5: createdAt 필드가 빈 문자열이거나 undefined인 경우 "-"가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocuments);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const dashes = screen.getAllByText('-');
+      expect(dashes.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });
 
 

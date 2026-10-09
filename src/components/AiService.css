@@ -256,6 +256,64 @@
   box-shadow: 0 6px 16px hsla(250, 80%, 50%, 0.3);
 }
 
+.doc-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.doc-search-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  color: #ffffff;
+  font-size: 0.85rem;
+  outline: none;
+  font-family: inherit;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.doc-search-input:focus {
+  border-color: hsl(265, 80%, 60%);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.doc-search-input::placeholder {
+  color: hsl(210, 10%, 45%);
+}
+
+.doc-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.doc-search-clear:hover {
+  color: #ffffff;
+}
+
+.doc-created-at {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: hsl(210, 10%, 65%);
+}
+
 .document-list-container {
   flex: 1;
   overflow-y: auto;
