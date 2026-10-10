@@ -115,9 +115,10 @@ describe('AnswerFeedback', () => {
     expect(screen.getByLabelText(/^정확도 2점/)).toBeChecked();
   });
 
-  it('저장에 성공하면 닫힌다', async () => {
+  it('저장에 성공하면 닫히고 onSuccess 콜백이 호출된다', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(<AnswerFeedback onSubmit={onSubmit} />);
+    const onSuccess = vi.fn();
+    render(<AnswerFeedback onSubmit={onSubmit} onSuccess={onSuccess} />);
     open();
     pick('정확도', 4);
     pick('유용성', 4);
@@ -127,5 +128,59 @@ describe('AnswerFeedback', () => {
     await waitFor(() =>
       expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument(),
     );
+    expect(onSuccess).toHaveBeenCalledWith(false);
+  });
+
+  it('기존 평가 수정 시 onSuccess 콜백에 true가 전달된다', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSuccess = vi.fn();
+    render(<AnswerFeedback existing={existing} onSubmit={onSubmit} onSuccess={onSuccess} />);
+    open();
+    fireEvent.click(screen.getByText('평가 수정'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('feedback-summary')).toBeInTheDocument(),
+    );
+    expect(onSuccess).toHaveBeenCalledWith(true);
+  });
+
+  it('정확도 4~5점일 때 feedback-positive 클래스가 적용된다', () => {
+    const { rerender } = render(
+      <AnswerFeedback existing={{ ...existing, accuracy: 5 }} onSubmit={vi.fn()} />,
+    );
+    expect(screen.getByTestId('feedback-summary')).toHaveClass('feedback-positive');
+
+    rerender(<AnswerFeedback existing={{ ...existing, accuracy: 4 }} onSubmit={vi.fn()} />);
+    expect(screen.getByTestId('feedback-summary')).toHaveClass('feedback-positive');
+  });
+
+  it('정확도 3점일 때 feedback-neutral 클래스가 적용된다', () => {
+    render(
+      <AnswerFeedback existing={{ ...existing, accuracy: 3 }} onSubmit={vi.fn()} />,
+    );
+    expect(screen.getByTestId('feedback-summary')).toHaveClass('feedback-neutral');
+  });
+
+  it('정확도 1~2점일 때 feedback-negative 클래스가 적용된다', () => {
+    const { rerender } = render(
+      <AnswerFeedback existing={{ ...existing, accuracy: 2 }} onSubmit={vi.fn()} />,
+    );
+    expect(screen.getByTestId('feedback-summary')).toHaveClass('feedback-negative');
+
+    rerender(<AnswerFeedback existing={{ ...existing, accuracy: 1 }} onSubmit={vi.fn()} />);
+    expect(screen.getByTestId('feedback-summary')).toHaveClass('feedback-negative');
+  });
+
+  it('글자 수 카운터가 기본값 및 입력값 길이에 맞게 실시간 렌더링된다', () => {
+    render(<AnswerFeedback onSubmit={vi.fn()} />);
+    open();
+
+    expect(screen.getByText('0 / 1000자')).toBeInTheDocument();
+
+    const sampleText = 'a'.repeat(120);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: sampleText } });
+
+    expect(screen.getByText('120 / 1000자')).toBeInTheDocument();
   });
 });
+

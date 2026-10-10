@@ -311,8 +311,10 @@ export const AiService = () => {
     input: { accuracy: number; helpfulness: number; comment?: string },
   ) => {
     if (!sessionId) return;
+    const isUpdate = Boolean(feedbackByTurn[turnIndex]);
     const saved = await submitAnswerFeedback({ sessionId, turnIndex, ...input });
     setFeedbackByTurn((prev) => ({ ...prev, [turnIndex]: saved }));
+    showBookmarkToast(isUpdate ? '답변 평가가 수정되었습니다.' : '답변 평가가 저장되었습니다.');
   };
 
   const handleLoadSession = async (sid: string) => {

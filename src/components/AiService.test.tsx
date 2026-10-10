@@ -3681,7 +3681,170 @@ describe('AiService Component', () => {
         expect(aiApi.getSessions).toHaveBeenLastCalledWith('test-user-1', 1, 50, '매출');
       });
     });
+
+    describe('답변 평가 피드백 토스트 알림', () => {
+      it('답변 평가를 신규 제출하면 "답변 평가가 저장되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-1',
+          title: '피드백 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '피드백 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '피드백 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: '좋습니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        // 세션 로드 (handleLoadSession 호출을 시뮬레이션하거나 getSessions mock 후 아이템 클릭)
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-1', title: '피드백 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '피드백' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('피드백 테스트 세션'));
+        });
+
+        // "이 답변을 평가하기" 버튼 클릭
+        const evalBtn = screen.getByRole('button', { name: /이 답변을 평가하기/i });
+        await act(async () => {
+          fireEvent.click(evalBtn);
+        });
+
+        // 정확도 5점, 유용성 4점 선택
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 4점/));
+        });
+
+        // 제출
+        const submitBtn = screen.getByRole('button', { name: /평가 제출/i });
+        await act(async () => {
+          fireEvent.click(submitBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: undefined,
+        });
+
+        // 토스트 알림 검증
+        expect(screen.getByText('답변 평가가 저장되었습니다.')).toBeInTheDocument();
+      });
+
+      it('기존 평가를 수정하여 제출하면 "답변 평가가 수정되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-2',
+          title: '수정 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '수정 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '수정 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([
+          {
+            sessionId: 'sess-fb-2',
+            turnIndex: 1,
+            accuracy: 3,
+            helpfulness: 3,
+            comment: '보통입니다',
+            createdAt: '2026-10-11T00:00:00Z',
+            updatedAt: '2026-10-11T00:00:00Z',
+          },
+        ]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-2',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 5,
+          comment: '보통입니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T01:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-2', title: '수정 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '수정' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('수정 테스트 세션'));
+        });
+
+        // 수정 버튼 클릭
+        const summaryBtn = screen.getByRole('button', { name: /내 평가/i });
+        await act(async () => {
+          fireEvent.click(summaryBtn);
+        });
+
+        // 정확도 5점 변경 후 수정 제출
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 5점/));
+        });
+
+        const updateBtn = screen.getByRole('button', { name: /평가 수정/i });
+        await act(async () => {
+          fireEvent.click(updateBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalled();
+        expect(screen.getByText('답변 평가가 수정되었습니다.')).toBeInTheDocument();
+      });
+    });
   });
 });
+
 
 
