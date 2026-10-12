@@ -1105,6 +1105,30 @@
   line-height: 1.4;
 }
 
+.ungrounded-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: #fca5a5;
+  line-height: 1.4;
+}
+
+.ungrounded-warning-icon {
+  font-size: 0.85rem;
+  color: #ef4444;
+  flex-shrink: 0;
+}
+
+.ungrounded-warning-text {
+  font-weight: 500;
+}
+
 /* ── 세션 사이드바 ── */
 .chat-modal {
   display: flex;
