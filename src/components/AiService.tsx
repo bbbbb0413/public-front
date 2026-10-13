@@ -121,6 +121,7 @@ export const AiService = () => {
 
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
 
   const showBookmarkToast = (msg: string) => {
     setBookmarkSuccessMsg(msg);
@@ -494,6 +495,26 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingDoc, isDeleting]);
 
+  const handleDownloadDocument = async (doc: DocumentInfo) => {
+    if (downloadingDocId) return;
+    setDownloadingDocId(doc.id);
+    try {
+      const blob = await getDocumentFile(doc.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setErrorMsg('문서 다운로드에 실패했습니다.');
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
   };
@@ -840,6 +861,17 @@ export const AiService = () => {
                           <div className="doc-actions">
                             {isFailed && (
                               <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
+                            )}
+                            {doc.status === 'completed' && (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadDocument(doc)}
+                                className="btn-download"
+                                disabled={downloadingDocId === doc.id}
+                                title="문서 다운로드"
+                              >
+                                {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
+                              </button>
                             )}
                             <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
                           </div>

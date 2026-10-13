@@ -3681,6 +3681,203 @@ describe('AiService Component', () => {
         expect(aiApi.getSessions).toHaveBeenLastCalledWith('test-user-1', 1, 50, '매출');
       });
     });
+
+    describe('SPEC-067: 지식베이스 문서 목록 내 원본 파일 다운로드 기능 연동 및 상태 피드백', () => {
+      let createObjectURLMock: ReturnType<typeof vi.fn>;
+      let revokeObjectURLMock: ReturnType<typeof vi.fn>;
+      let clickSpy: any;
+
+      beforeEach(() => {
+        createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+        revokeObjectURLMock = vi.fn();
+        vi.stubGlobal('URL', {
+          ...URL,
+          createObjectURL: createObjectURLMock,
+          revokeObjectURL: revokeObjectURLMock,
+        });
+        clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      });
+
+      it('AC 1: Given 색인 완료된 문서가 목록에 있을 때 When [다운로드] 버튼을 클릭하면 Then getDocumentFile이 호출되고 파일 다운로드가 시작된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        const fakeBlob = new Blob(['pdf-content'], { type: 'application/pdf' });
+        vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+        expect(downloadBtn).toBeInTheDocument();
+        expect(downloadBtn).not.toBeDisabled();
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-report');
+        expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
+        expect(clickSpy).toHaveBeenCalled();
+        expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-url');
+      });
+
+      it('AC 2: Given 특정 문서의 다운로드가 진행 중일 때 When 다운로드 완료 전까지 Then 버튼 텍스트가 "다운로드 중..."으로 변경되고 disabled 상태가 된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDownload: (value: Blob) => void;
+        const downloadPromise = new Promise<Blob>((resolve) => {
+          resolveDownload = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(downloadPromise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeDisabled();
+
+        await act(async () => {
+          resolveDownload!(new Blob(['pdf-data']));
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).not.toBeDisabled();
+      });
+
+      it('AC 3: Given 다운로드 API 호출 시 에러가 발생했을 때 When 다운로드 핸들러가 예외를 포착하면 Then 상단 에러 배너에 에러 메시지가 표시되고 다운로드 진행 상태가 해제된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Network error'));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByText('문서 다운로드에 실패했습니다.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).not.toBeDisabled();
+      });
+
+      it('AC 4: Given 인제스트 진행 중이거나 실패 상태인 문서의 경우 When 문서 목록이 렌더링될 때 Then 해당 문서 행에는 다운로드 버튼이 노출되지 않는다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-processing',
+            fileName: 'processing.pdf',
+            status: 'processing',
+            chunkCount: 0,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-failed',
+            fileName: 'failed.pdf',
+            status: 'failed',
+            chunkCount: 0,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        expect(screen.queryByRole('button', { name: /다운로드/i })).not.toBeInTheDocument();
+      });
+
+      it('AC 5: Given 여러 완료 문서가 있을 때 한 문서의 다운로드가 진행 중이어도 다른 문서 행의 다운로드 버튼은 영향을 받지 않고 독립적으로 관리된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-1',
+            fileName: 'doc1.pdf',
+            status: 'completed',
+            chunkCount: 2,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-2',
+            fileName: 'doc2.pdf',
+            status: 'completed',
+            chunkCount: 4,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDoc1: (value: Blob) => void;
+        const doc1Promise = new Promise<Blob>((resolve) => {
+          resolveDoc1 = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(doc1Promise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtns = screen.getAllByRole('button', { name: '다운로드' });
+        expect(downloadBtns).toHaveLength(2);
+
+        await act(async () => {
+          fireEvent.click(downloadBtns[0]);
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeDisabled();
+
+        const remainingDownloadBtn = screen.getByRole('button', { name: '다운로드' });
+        expect(remainingDownloadBtn).toBeInTheDocument();
+        expect(remainingDownloadBtn).not.toBeDisabled();
+
+        await act(async () => {
+          resolveDoc1!(new Blob(['doc-1 data']));
+        });
+
+        expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+      });
+    });
   });
 });
 
