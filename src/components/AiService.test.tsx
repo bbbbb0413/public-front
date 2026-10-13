@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
 import { AiService } from './AiService';
 import { AuthContext } from '../context/AuthContext';
@@ -3685,9 +3685,12 @@ describe('AiService Component', () => {
     describe('SPEC-067: 지식베이스 문서 목록 내 원본 파일 다운로드 기능 연동 및 상태 피드백', () => {
       let createObjectURLMock: ReturnType<typeof vi.fn>;
       let revokeObjectURLMock: ReturnType<typeof vi.fn>;
-      let clickSpy: any;
+      const capturedAnchor = { download: '', href: '' };
+      let clickSpy: MockInstance;
 
       beforeEach(() => {
+        capturedAnchor.download = '';
+        capturedAnchor.href = '';
         createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
         revokeObjectURLMock = vi.fn();
         vi.stubGlobal('URL', {
@@ -3695,7 +3698,10 @@ describe('AiService Component', () => {
           createObjectURL: createObjectURLMock,
           revokeObjectURL: revokeObjectURLMock,
         });
-        clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+        clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+          capturedAnchor.download = this.download;
+          capturedAnchor.href = this.href;
+        });
       });
 
       afterEach(() => {
@@ -3732,6 +3738,9 @@ describe('AiService Component', () => {
         expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-report');
         expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
         expect(clickSpy).toHaveBeenCalled();
+        expect(capturedAnchor.download).toBe('report.pdf');
+        expect(capturedAnchor.href).toBe('blob:mock-url');
+        expect(document.body.querySelector('a[download]')).toBeNull();
         expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-url');
       });
 
@@ -3876,6 +3885,123 @@ describe('AiService Component', () => {
         });
 
         expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+      });
+
+      it('Given 다운로드가 진행 중일 때 When 사용자가 다른 완료 문서의 다운로드 버튼을 클릭하면 Then 중복 다운로드 요청이 방지된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-1',
+            fileName: 'doc1.pdf',
+            status: 'completed',
+            chunkCount: 2,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-2',
+            fileName: 'doc2.pdf',
+            status: 'completed',
+            chunkCount: 4,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDoc1: (value: Blob) => void;
+        const doc1Promise = new Promise<Blob>((resolve) => {
+          resolveDoc1 = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(doc1Promise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtns = screen.getAllByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtns[0]);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+        expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-1');
+
+        // doc-1 다운로드가 진행 중인 동안 doc-2의 다운로드 버튼 클릭 시도
+        const remainingDownloadBtn = screen.getByRole('button', { name: '다운로드' });
+        await act(async () => {
+          fireEvent.click(remainingDownloadBtn);
+        });
+
+        // getDocumentFile이 추가로 호출되지 않아야 함
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          resolveDoc1!(new Blob(['doc-1 content']));
+        });
+      });
+
+      it('Given 다운로드 실패 후 에러 배너가 표시되었을 때 When 사용자가 다시 다운로드를 클릭하면 Then 정상적으로 재시도할 수 있다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-retry',
+            fileName: 'retry.pdf',
+            status: 'completed',
+            chunkCount: 3,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile)
+          .mockRejectedValueOnce(new Error('Temporary 500 error'))
+          .mockResolvedValueOnce(new Blob(['success-content']));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        // 1차 시도: 실패
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByText('문서 다운로드에 실패했습니다.')).toBeInTheDocument();
+
+        // 2차 시도: 성공 재시도
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(2);
+        expect(capturedAnchor.download).toBe('retry.pdf');
+        expect(capturedAnchor.href).toBe('blob:mock-url');
+      });
+
+      it('Given 한글 및 특수문자가 포함된 파일명의 문서일 때 When 다운로드를 실행하면 Then 원본 파일명이 온전하게 다운로드 속성에 지정된다', async () => {
+        const specialFileName = '2026년도_AI사업 [최종 보고서] (v1.2).pdf';
+        const mockDocs = [
+          {
+            id: 'doc-special',
+            fileName: specialFileName,
+            status: 'completed',
+            chunkCount: 10,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(new Blob(['pdf-data']));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(capturedAnchor.download).toBe(specialFileName);
       });
     });
   });
