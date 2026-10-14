@@ -34,6 +34,9 @@ import {
   activateMyPrompt,
   resetMyPrompt,
   deleteMyPromptVersion,
+  submitAnswerFeedback,
+  getSessionFeedback,
+  deleteAnswerFeedback,
 } from './ai';
 
 const mockAxios = axios as unknown as {
@@ -882,6 +885,66 @@ describe('AI Service API (Gateway 경유)', () => {
       await deleteMyPromptVersion(2);
       expect(mockAxios.delete).toHaveBeenCalledWith('/ai/my-prompt/2');
     });
+
+    it('submitAnswerFeedback should post feedback to /ai/feedback', async () => {
+      const mockFeedback = {
+        sessionId: 's-1',
+        turnIndex: 1,
+        accuracy: 5,
+        helpfulness: 4,
+        comment: '좋습니다',
+        createdAt: '2026-10-15T00:00:00Z',
+        updatedAt: '2026-10-15T00:00:00Z',
+      };
+      mockAxios.post.mockResolvedValueOnce({ data: mockFeedback });
+
+      const result = await submitAnswerFeedback({
+        sessionId: 's-1',
+        turnIndex: 1,
+        accuracy: 5,
+        helpfulness: 4,
+        comment: '좋습니다',
+      });
+      expect(mockAxios.post).toHaveBeenCalledWith('/ai/feedback', {
+        sessionId: 's-1',
+        turnIndex: 1,
+        accuracy: 5,
+        helpfulness: 4,
+        comment: '좋습니다',
+      });
+      expect(result).toEqual(mockFeedback);
+    });
+
+    it('getSessionFeedback should get feedbacks from /ai/feedback with sessionId param', async () => {
+      const mockFeedbacks = [
+        {
+          sessionId: 's-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: '좋습니다',
+          createdAt: '2026-10-15T00:00:00Z',
+          updatedAt: '2026-10-15T00:00:00Z',
+        },
+      ];
+      mockAxios.get.mockResolvedValueOnce({ data: mockFeedbacks });
+
+      const result = await getSessionFeedback('s-1');
+      expect(mockAxios.get).toHaveBeenCalledWith('/ai/feedback', {
+        params: { sessionId: 's-1' },
+      });
+      expect(result).toEqual(mockFeedbacks);
+    });
+
+    it('deleteAnswerFeedback should delete feedback via DELETE /ai/feedback with sessionId and turnIndex params (SPEC-068)', async () => {
+      mockAxios.delete.mockResolvedValueOnce({ data: undefined });
+
+      await deleteAnswerFeedback('s-1', 1);
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/feedback', {
+        params: { sessionId: 's-1', turnIndex: 1 },
+      });
+    });
   });
 });
+
 

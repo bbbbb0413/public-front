@@ -18,6 +18,7 @@ vi.mock('../api/ai', () => {
     getDocumentFile: vi.fn(),
     submitAnswerFeedback: vi.fn(),
     getSessionFeedback: vi.fn().mockResolvedValue([]),
+    deleteAnswerFeedback: vi.fn(),
     toggleSessionBookmark: vi.fn(),
     getBookmarks: vi.fn().mockResolvedValue([]),
     createBookmark: vi.fn(),
@@ -1803,6 +1804,67 @@ describe('AiService Component', () => {
         helpfulness: 3,
         comment: undefined,
       });
+    });
+
+    it('Given 사용자가 이미 답변을 평가한 상태에서 When 평가 삭제를 클릭하면 Then DELETE /ai/feedback이 호출되고 피드백 상태가 초기화된다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-1', title: '평가 삭제할 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-1',
+        title: '평가 삭제할 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 5,
+          comment: '좋음',
+          createdAt: '2026-08-28T01:00:00Z',
+          updatedAt: '2026-08-28T01:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteAnswerFeedback).mockResolvedValue(undefined);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('평가 삭제할 세션'));
+      });
+
+      // 기존 평가 요약 확인
+      expect(screen.getByTestId('feedback-summary')).toHaveTextContent('정확도 4/5 · 유용성 5/5');
+
+      // 수정 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('feedback-summary'));
+      });
+
+      // 평가 삭제 버튼 클릭
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+      });
+
+      expect(aiApi.deleteAnswerFeedback).toHaveBeenCalledWith('sess-1', 1);
+      // 삭제 후 기본 평가하기 버튼으로 복원 및 성공 안내 반영
+      expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+      expect(screen.getByText('답변 평가가 삭제되었습니다.')).toBeInTheDocument();
     });
 
     it('Given 메타데이터가 없는 레거시 세션 데이터 When 세션을 복원하면 Then 에러 없이 텍스트가 렌더링되고 출처 목록은 빈 상태로 유지된다', async () => {

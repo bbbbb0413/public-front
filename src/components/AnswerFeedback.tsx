@@ -28,6 +28,7 @@ interface Props {
     helpfulness: number;
     comment?: string;
   }) => Promise<void>;
+  onDelete?: () => Promise<void>;
 }
 
 interface ScaleProps {
@@ -69,20 +70,34 @@ const RatingScale = ({ legend, name, labels, value, onChange }: ScaleProps) => (
  * 이미 평가한 답변이면 접힌 상태로 결과만 보여주고, 눌러서 다시 고칠 수 있다.
  * 다시 제출하면 서버가 기존 평가를 갱신한다.
  */
-export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
+export const AnswerFeedback = ({ existing, onSubmit, onDelete }: Props) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  const [prevExisting, setPrevExisting] = useState(existing);
+
   const [accuracy, setAccuracy] = useState<number | null>(existing?.accuracy ?? null);
   const [helpfulness, setHelpfulness] = useState<number | null>(
     existing?.helpfulness ?? null,
   );
   const [comment, setComment] = useState(existing?.comment ?? '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = accuracy !== null && helpfulness !== null && !saving;
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
+    setDeleted(false);
+    setAccuracy(existing?.accuracy ?? null);
+    setHelpfulness(existing?.helpfulness ?? null);
+    setComment(existing?.comment ?? '');
+  }
+
+  const effectiveExisting = deleted ? undefined : existing;
+  const isBusy = saving || deleting;
+  const canSubmit = accuracy !== null && helpfulness !== null && !isBusy;
 
   const handleSubmit = async () => {
-    if (accuracy === null || helpfulness === null || saving) return;
+    if (accuracy === null || helpfulness === null || isBusy) return;
     setSaving(true);
     setError(null);
     try {
@@ -91,6 +106,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
         helpfulness,
         comment: comment.trim() || undefined,
       });
+      setDeleted(false);
       setIsOpen(false);
     } catch {
       // 네트워크 오류로 평가가 날아가면 사용자는 다시 쓸 마음을 잃는다.
@@ -101,17 +117,35 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!onDelete || isBusy) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete();
+      setDeleted(true);
+      setAccuracy(null);
+      setHelpfulness(null);
+      setComment('');
+      setIsOpen(false);
+    } catch {
+      setError('평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (!isOpen) {
     return (
       <div className="answer-feedback collapsed" data-testid="answer-feedback">
-        {existing ? (
+        {effectiveExisting ? (
           <button
             type="button"
             className="btn-feedback-toggle rated"
             onClick={() => setIsOpen(true)}
           >
             <span className="feedback-summary" data-testid="feedback-summary">
-              내 평가 · 정확도 {existing.accuracy}/5 · 유용성 {existing.helpfulness}/5
+              내 평가 · 정확도 {effectiveExisting.accuracy}/5 · 유용성 {effectiveExisting.helpfulness}/5
             </span>
             <span className="feedback-edit-hint">수정</span>
           </button>
@@ -164,11 +198,21 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
       )}
 
       <div className="feedback-actions">
+        {effectiveExisting && onDelete && (
+          <button
+            type="button"
+            className="btn-feedback-delete"
+            onClick={handleDelete}
+            disabled={isBusy}
+          >
+            {deleting ? '삭제 중…' : '평가 삭제'}
+          </button>
+        )}
         <button
           type="button"
           className="btn-feedback-cancel"
           onClick={() => setIsOpen(false)}
-          disabled={saving}
+          disabled={isBusy}
         >
           취소
         </button>
@@ -178,7 +222,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           onClick={handleSubmit}
           disabled={!canSubmit}
         >
-          {saving ? '저장 중…' : existing ? '평가 수정' : '평가 제출'}
+          {saving ? '저장 중…' : effectiveExisting ? '평가 수정' : '평가 제출'}
         </button>
       </div>
     </div>
