@@ -1865,6 +1865,116 @@ describe('AiService Component', () => {
       // 삭제 후 기본 평가하기 버튼으로 복원 및 성공 안내 반영
       expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
       expect(screen.getByText('답변 평가가 삭제되었습니다.')).toBeInTheDocument();
+
+      // 삭제 완료 후 다시 "이 답변을 평가하기"를 누르면 비어있는 등록 폼이 열리고 평가 삭제 버튼이 없어야 한다
+      await act(async () => {
+        fireEvent.click(screen.getByText('이 답변을 평가하기'));
+      });
+      expect(screen.queryByRole('button', { name: '평가 삭제' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '평가 제출' })).toBeDisabled();
+    });
+
+    it('Given 사용자가 답변 평가 삭제를 요청했으나 서버 에러가 발생한 경우 When 삭제 실패 시 Then 에러 메시지를 표시하고 기존 평가를 유지한다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-err', title: '에러 테스트 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-err',
+        title: '에러 테스트 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-err',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 5,
+          comment: '유지될 의견',
+          createdAt: '2026-08-28T01:00:00Z',
+          updatedAt: '2026-08-28T01:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteAnswerFeedback).mockRejectedValueOnce(new Error('404 Not Found'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('에러 테스트 세션'));
+      });
+
+      // 수정 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('feedback-summary'));
+      });
+
+      // 평가 삭제 버튼 클릭
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+      });
+
+      expect(aiApi.deleteAnswerFeedback).toHaveBeenCalledWith('sess-err', 1);
+      // 삭제 실패 에러 메시지 노출 및 입력값 유지 확인
+      expect(screen.getByTestId('feedback-error')).toHaveTextContent(
+        '평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      );
+      expect(screen.getByRole('button', { name: '평가 삭제' })).toBeEnabled();
+      expect(screen.getByPlaceholderText(/무엇이 아쉬웠는지/i)).toHaveValue('유지될 의견');
+    });
+
+    it('Given 평가가 등록되지 않은 세션 답변의 경우 When 사용자가 평가 등록 폼을 열면 Then 평가 삭제 버튼 없이 취소와 평가 제출 버튼만 노출된다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-unrated', title: '미평가 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-unrated',
+        title: '미평가 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('미평가 세션'));
+      });
+
+      // 평가 등록 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByText('이 답변을 평가하기'));
+      });
+
+      // 수용 기준 검증: 평가 삭제 버튼은 없고 취소와 평가 제출 버튼만 표시
+      expect(screen.queryByRole('button', { name: '평가 삭제' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '취소' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '평가 제출' })).toBeInTheDocument();
     });
 
     it('Given 메타데이터가 없는 레거시 세션 데이터 When 세션을 복원하면 Then 에러 없이 텍스트가 렌더링되고 출처 목록은 빈 상태로 유지된다', async () => {

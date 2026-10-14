@@ -944,6 +944,16 @@ describe('AI Service API (Gateway 경유)', () => {
         params: { sessionId: 's-1', turnIndex: 1 },
       });
     });
+
+    it('deleteAnswerFeedback should reject when gateway returns 404/400 error (SPEC-068)', async () => {
+      const error = new Error('Request failed with status code 404');
+      mockAxios.delete.mockRejectedValueOnce(error);
+
+      await expect(deleteAnswerFeedback('invalid-session', 99)).rejects.toThrow('Request failed with status code 404');
+      expect(mockAxios.delete).toHaveBeenCalledWith('/ai/feedback', {
+        params: { sessionId: 'invalid-session', turnIndex: 99 },
+      });
+    });
   });
 });
 
