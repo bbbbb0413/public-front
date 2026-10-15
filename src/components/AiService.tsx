@@ -52,6 +52,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  sources?: SourceRef[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -325,6 +326,7 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        sources: t.sources,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
@@ -661,6 +663,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
+    let capturedSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -673,7 +676,16 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing }]);
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated,
+            confidence,
+            missing,
+            sources: capturedSources,
+          },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentProgress(null);
@@ -690,7 +702,10 @@ export const AiService = () => {
       },
       userId,
       prevChatLog,
-      (sources) => setCurrentSources(sources),
+      (sources) => {
+        capturedSources = sources;
+        setCurrentSources(sources);
+      },
       sessionId,
       (newId) => setSessionId(newId),
       (progress) => {
@@ -1095,6 +1110,32 @@ export const AiService = () => {
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
                         <>
+                          {(() => {
+                            const hasNoSources = !msg.sources || msg.sources.length === 0;
+                            const isUngrounded =
+                              hasNoSources &&
+                              (msg.confidence === 0 ||
+                                Boolean(
+                                  msg.missing &&
+                                    msg.missing.some(
+                                      (m) =>
+                                        m.includes('찾지 못함') ||
+                                        m.includes('미발견') ||
+                                        m.includes('지식베이스') ||
+                                        m.includes('문서'),
+                                    ),
+                                ));
+                            if (!isUngrounded) return null;
+                            return (
+                              <div
+                                className="ungrounded-warning"
+                                data-testid="ungrounded-warning"
+                                role="status"
+                              >
+                                근거 문서 미발견 (모델 일반 지식 기반 답변)
+                              </div>
+                            );
+                          })()}
                           <ReactMarkdown
                             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                             rehypePlugins={MARKDOWN_REHYPE_PLUGINS}

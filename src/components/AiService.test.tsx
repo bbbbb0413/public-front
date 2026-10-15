@@ -3682,6 +3682,216 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-069: 단발성 RAG 질의 신뢰도 산출 및 근거 문서 미참조 답변 경고 표시', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-uuid', nickName: '홍길동' },
+      token: 'mock-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 지식베이스에 관련 문서가 등록되어 있고 단발성 질의 검색 결과 청크(최고 점수 0.85)가 반환되었을 때 When 사용자가 질문을 전송하고 답변 스트리밍이 완료되면 Then AI 메시지 버블에 신뢰도 배지("신뢰도: 85%")가 녹색(confidence-high)으로 렌더링되고 근거 부재 경고는 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      let capturedOnMessage: ((text: string) => void) | undefined;
+      let capturedOnDone: ((meta?: { confidence?: number; missing?: string[] }) => void) | undefined;
+      let capturedOnSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((_q, onMsg, onDone, _onError, _uid, _log, onSrc) => {
+        capturedOnMessage = onMsg;
+        capturedOnDone = onDone;
+        capturedOnSources = onSrc;
+        return Promise.resolve() as aiApi.AskQuestionStreamHandle;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText('지식베이스에 대해 질문을 입력하세요...');
+      fireEvent.change(input, { target: { value: '사내 규정 알려줘' } });
+
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        capturedOnSources?.([
+          {
+            documentId: 'doc-1',
+            fileName: 'rules.pdf',
+            chunkIndex: 0,
+            snippet: '규정 내용',
+            score: 0.85,
+          },
+        ]);
+        capturedOnMessage?.('규정 답변 내용입니다.');
+        capturedOnDone?.({ confidence: 0.85, missing: [] });
+      });
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveClass('confidence-high');
+      expect(badge).toHaveTextContent('85%');
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+      expect(screen.queryByText(/근거 문서 미발견/)).not.toBeInTheDocument();
+    });
+
+    it('Given 지식베이스에 관련 문서가 전혀 없거나 검색 결과가 0건인 상태에서 When 사용자가 단발성 질의를 전송하여 답변이 완료되면 Then 백엔드는 confidence: 0.0 및 missing: ["관련 지식베이스 문서를 찾지 못함"]을 전달하고, 메시지 버블에 "근거 문서 미발견 (모델 일반 지식 기반 답변)" 경고 배너가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      let capturedOnMessage: ((text: string) => void) | undefined;
+      let capturedOnDone: ((meta?: { confidence?: number; missing?: string[] }) => void) | undefined;
+      let capturedOnSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((_q, onMsg, onDone, _onError, _uid, _log, onSrc) => {
+        capturedOnMessage = onMsg;
+        capturedOnDone = onDone;
+        capturedOnSources = onSrc;
+        return Promise.resolve() as aiApi.AskQuestionStreamHandle;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText('지식베이스에 대해 질문을 입력하세요...');
+      fireEvent.change(input, { target: { value: '없는 정보 질문' } });
+
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        capturedOnSources?.([]);
+        capturedOnMessage?.('문서에 없는 일반 모델 답변입니다.');
+        capturedOnDone?.({
+          confidence: 0.0,
+          missing: ['관련 지식베이스 문서를 찾지 못함'],
+        });
+      });
+
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveClass('confidence-low');
+      expect(badge).toHaveTextContent('0%');
+    });
+
+    it('Given 근거 문서 미발견 경고가 포함된 대화 세션이 저장된 상태에서 When 사용자가 사이드바에서 해당 세션을 선택하여 복원(handleLoadSession)하면 Then 해당 AI 메시지 버블에 과거 저장된 신뢰도 0% 및 근거 미참조 경고 배너가 그대로 다시 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-ungrounded', title: '근거 미참조 세션', updatedAt: '2026-10-16T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-ungrounded',
+        title: '근거 미참조 세션',
+        createdAt: '2026-10-16T01:00:00Z',
+        updatedAt: '2026-10-16T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '근거 없는 과거 답변입니다.',
+            createdAt: '2026-10-16T01:00:01Z',
+            confidence: 0.0,
+            missing: ['관련 지식베이스 문서를 찾지 못함'],
+            sources: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('근거 미참조 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const warningBanner = screen.getByTestId('ungrounded-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+
+      const badge = screen.getByTestId('confidence-badge');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveClass('confidence-low');
+      expect(badge).toHaveTextContent('0%');
+    });
+
+    it('Given 신뢰도 정보가 없는 과거 레거시 세션 데이터(confidence: undefined, missing: undefined)를 불러왔을 때 When 세션 상세 화면을 렌더링하면 Then 오류나 화면 깨짐 없이 일반 텍스트 메시지만 정상 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-legacy-2', title: '과거 레거시 세션', updatedAt: '2026-10-16T01:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-legacy-2',
+        title: '과거 레거시 세션',
+        createdAt: '2026-10-16T01:00:00Z',
+        updatedAt: '2026-10-16T01:00:00Z',
+        turns: [
+          {
+            role: 'assistant',
+            content: '순수 레거시 텍스트 답변입니다.',
+            createdAt: '2026-10-16T01:00:01Z',
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('과거 레거시 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('confidence-badge')).not.toBeInTheDocument();
+      expect(screen.getAllByText('순수 레거시 텍스트 답변입니다.').length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
 
 
