@@ -1,7 +1,8 @@
 import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React, { useContext } from 'react';
-import { AuthContext, AuthProvider } from './AuthContext';
+import { AuthContext } from './AuthContext';
+import { AuthProvider } from './AuthProvider';
 import axios from 'axios';
 
 // localStorage 모킹

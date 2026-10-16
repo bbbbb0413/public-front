@@ -1,31 +1,23 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import { useState, ReactNode } from 'react';
 import { adminLogin as apiAdminLogin, adminSignup as apiAdminSignup, AdminUser } from '../api/admin';
+import { AdminAuthContext } from './AdminAuthContext';
 
-interface AdminAuthContextType {
-  admin: AdminUser | null;
-  isAdminAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
-}
-
-export const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
+// 저장된 값이 깨져 있으면 지우고 로그아웃 상태로 시작한다.
+const readSavedAdmin = (): AdminUser | null => {
+  const token = localStorage.getItem('admin_token');
+  const saved = localStorage.getItem('admin_info');
+  if (!token || !saved) return null;
+  try {
+    return JSON.parse(saved);
+  } catch {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_info');
+    return null;
+  }
+};
 
 export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
-  const [admin, setAdmin] = useState<AdminUser | null>(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem('admin_token');
-    const saved = localStorage.getItem('admin_info');
-    if (token && saved) {
-      try {
-        setAdmin(JSON.parse(saved));
-      } catch {
-        localStorage.removeItem('admin_token');
-        localStorage.removeItem('admin_info');
-      }
-    }
-  }, []);
+  const [admin, setAdmin] = useState<AdminUser | null>(readSavedAdmin);
 
   const login = async (email: string, password: string) => {
     const result = await apiAdminLogin(email, password);

@@ -70,7 +70,7 @@ describe('LlmMonitor', () => {
   it('예상치 못한 상태값이 오더라도 런타임 에러 없이 기본 CLOSED 스타일로 렌더링한다', async () => {
     vi.mocked(aiAdminApi.getLlmCosts).mockResolvedValueOnce([]);
     vi.mocked(aiAdminApi.getCircuitBreakers).mockResolvedValueOnce([
-      { model: 'custom-model', status: '' as any, failureCount: 0, openedAt: null },
+      { model: 'custom-model', status: '' as never, failureCount: 0, openedAt: null },
     ]);
 
     render(<LlmMonitor />);

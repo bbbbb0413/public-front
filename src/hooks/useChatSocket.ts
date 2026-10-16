@@ -114,7 +114,7 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
           setError(response.error || '메시지 전송에 실패했습니다.');
         }
       });
-    } catch (e) {
+    } catch {
       setError('메시지 빌드 중 오류가 발생했습니다.');
     }
   }, [roomId, connected]);

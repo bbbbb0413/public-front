@@ -75,7 +75,7 @@ export const AiService = () => {
 
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [documentSearchQuery, setDocumentSearchQuery] = useState('');
-  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -164,6 +164,11 @@ export const AiService = () => {
     } finally {
       setLoadingBookmarks(false);
     }
+  };
+
+  const openChat = () => {
+    setIsChatOpen(true);
+    fetchSessions();
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -374,21 +379,22 @@ export const AiService = () => {
     }
   };
 
+  const loadDocuments = () =>
+    getDocuments()
+      .then((docs) => {
+        setDocuments(docs || []);
+        setErrorMsg('');
+      })
+      .catch(() => setErrorMsg('문서 목록을 불러오는 데 실패했습니다.'))
+      .finally(() => setLoadingDocs(false));
+
   const fetchDocuments = async () => {
     setLoadingDocs(true);
-    try {
-      const docs = await getDocuments();
-      setDocuments(docs || []);
-      setErrorMsg('');
-    } catch {
-      setErrorMsg('문서 목록을 불러오는 데 실패했습니다.');
-    } finally {
-      setLoadingDocs(false);
-    }
+    await loadDocuments();
   };
 
   useEffect(() => {
-    fetchDocuments();
+    loadDocuments();
   }, []);
 
   useEffect(() => {
@@ -414,7 +420,6 @@ export const AiService = () => {
     };
     document.addEventListener('keydown', handleKeyDown);
     setTimeout(() => chatInputRef.current?.focus(), 50);
-    if (userId) fetchSessions();
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isChatOpen]);
 
@@ -695,7 +700,7 @@ export const AiService = () => {
           <div className="ai-hub-actions">
             <button
               type="button"
-              onClick={() => setIsChatOpen(true)}
+              onClick={openChat}
               className="hub-nav-btn hub-nav-btn--primary"
             >
               새 질문 시작
@@ -887,7 +892,7 @@ export const AiService = () => {
               >
                 AI 설정 ⚙
               </button>
-              <button onClick={() => setIsChatOpen(true)} className="btn-open-chat">
+              <button onClick={openChat} className="btn-open-chat">
                 채팅 열기 ↗
               </button>
             </div>
@@ -898,7 +903,7 @@ export const AiService = () => {
               <div className="qa-preview-empty">
                 <div className="qa-preview-icon" aria-hidden="true">🤖</div>
                 <p>등록된 문서를 기반으로 AI와 대화할 수 있습니다</p>
-                <button onClick={() => setIsChatOpen(true)} className="btn-start-chat">
+                <button onClick={openChat} className="btn-start-chat">
                   채팅 시작하기
                 </button>
               </div>
@@ -913,7 +918,7 @@ export const AiService = () => {
                     </span>
                   </div>
                 )}
-                <button onClick={() => setIsChatOpen(true)} className="btn-continue-chat">
+                <button onClick={openChat} className="btn-continue-chat">
                   대화 계속하기 →
                 </button>
               </div>

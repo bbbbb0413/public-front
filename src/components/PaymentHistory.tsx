@@ -13,11 +13,8 @@ export const PaymentHistory = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const loadPayments = useCallback((targetPage: number) => {
+  const requestPayments = useCallback((targetPage: number) => {
     let cancelled = false;
-    setLoading(true);
-    setError('');
-
     listPayments(targetPage, 20)
       .then((result) => {
         if (!cancelled) {
@@ -44,10 +41,16 @@ export const PaymentHistory = () => {
     };
   }, []);
 
+  const loadPayments = (targetPage: number) => {
+    setLoading(true);
+    setError('');
+    return requestPayments(targetPage);
+  };
+
   useEffect(() => {
-    const cleanup = loadPayments(1);
+    const cleanup = requestPayments(1);
     return cleanup;
-  }, [loadPayments]);
+  }, [requestPayments]);
 
   const handlePrevPage = () => {
     if (hasPreviousPage && page > 1) {

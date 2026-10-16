@@ -28,9 +28,13 @@ export default function RagasEvalPanel() {
   const [error, setError] = useState<string | null>(null);
   const [limit, setLimit] = useState(20);
 
-  useEffect(() => {
+  const handleLimitChange = (next: number) => {
     setLoading(true);
     setError(null);
+    setLimit(next);
+  };
+
+  useEffect(() => {
     getRagasEvals(limit)
       .then(setEvals)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to load'))
@@ -46,7 +50,7 @@ export default function RagasEvalPanel() {
         <h2 style={{ margin: 0, fontSize: 18, color: '#f1f5f9' }}>RAGAS 평가 결과</h2>
         <select
           value={limit}
-          onChange={(e) => setLimit(Number(e.target.value))}
+          onChange={(e) => handleLimitChange(Number(e.target.value))}
           style={{
             background: '#1e293b',
             border: '1px solid #334155',

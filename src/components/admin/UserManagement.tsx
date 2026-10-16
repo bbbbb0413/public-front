@@ -19,7 +19,7 @@ export const UserManagement = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const [detailUser, setDetailUser] = useState<AdminUser | null>(null);
@@ -30,21 +30,28 @@ export const UserManagement = () => {
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
 
-  const fetchUsers = useCallback(async (p: number) => {
+  const loadUsers = useCallback((p: number) =>
+    getUsers(p, 10)
+      .then((result) => {
+        setUsers(result.data);
+        setMeta(result.meta);
+      })
+      .catch(() => setError('유저 목록을 불러오지 못했습니다.'))
+      .finally(() => setLoading(false)), []);
+
+  const fetchUsers = async (p: number) => {
     setLoading(true);
     setError('');
-    try {
-      const result = await getUsers(p, 10);
-      setUsers(result.data);
-      setMeta(result.meta);
-    } catch {
-      setError('유저 목록을 불러오지 못했습니다.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await loadUsers(p);
+  };
 
-  useEffect(() => { fetchUsers(page); }, [fetchUsers, page]);
+  const goToPage = (p: number) => {
+    setLoading(true);
+    setError('');
+    setPage(p);
+  };
+
+  useEffect(() => { loadUsers(page); }, [loadUsers, page]);
 
   const handleToggleActivate = async (user: AdminUser) => {
     try {
@@ -196,7 +203,7 @@ export const UserManagement = () => {
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 16 }}>
           <button
             disabled={!meta.hasPreviousPage}
-            onClick={() => setPage(p => p - 1)}
+            onClick={() => goToPage(page - 1)}
             style={{ padding: '6px 14px', background: meta.hasPreviousPage ? '#334155' : '#1e293b', border: 'none', borderRadius: 6, color: meta.hasPreviousPage ? '#94a3b8' : '#475569', cursor: meta.hasPreviousPage ? 'pointer' : 'not-allowed', fontSize: 13 }}
           >
             이전
@@ -204,7 +211,7 @@ export const UserManagement = () => {
           <span style={{ color: '#64748b', fontSize: 13 }}>{page} / {meta.pageCount}</span>
           <button
             disabled={!meta.hasNextPage}
-            onClick={() => setPage(p => p + 1)}
+            onClick={() => goToPage(page + 1)}
             style={{ padding: '6px 14px', background: meta.hasNextPage ? '#334155' : '#1e293b', border: 'none', borderRadius: 6, color: meta.hasNextPage ? '#94a3b8' : '#475569', cursor: meta.hasNextPage ? 'pointer' : 'not-allowed', fontSize: 13 }}
           >
             다음

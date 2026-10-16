@@ -8,26 +8,28 @@ import {
 export const LlmMonitor = () => {
   const [costs, setCosts] = useState<LlmCost[]>([]);
   const [breakers, setBreakers] = useState<CircuitBreaker[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const loadData = () =>
+    Promise.all([getLlmCosts(), getCircuitBreakers()])
+      .then(([costData, breakerData]) => {
+        setCosts(costData);
+        setBreakers(breakerData);
+        setError('');
+      })
+      .catch(() => setError('데이터를 불러오지 못했습니다.'))
+      .finally(() => setLoading(false));
 
   const fetchData = async () => {
     setLoading(true);
     setError('');
-    try {
-      const [costData, breakerData] = await Promise.all([getLlmCosts(), getCircuitBreakers()]);
-      setCosts(costData);
-      setBreakers(breakerData);
-    } catch {
-      setError('데이터를 불러오지 못했습니다.');
-    } finally {
-      setLoading(false);
-    }
+    await loadData();
   };
 
   useEffect(() => {
-    fetchData();
-    const id = setInterval(fetchData, 30_000);
+    loadData();
+    const id = setInterval(loadData, 30_000);
     return () => clearInterval(id);
   }, []);
 

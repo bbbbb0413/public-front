@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
-import { AuthProvider, AuthContext } from './context/AuthContext';
-import { AdminAuthProvider } from './context/AdminAuthContext';
+import { AuthContext } from './context/AuthContext';
+import { AuthProvider } from './context/AuthProvider';
+import { AdminAuthProvider } from './context/AdminAuthProvider';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { Profile } from './components/Profile';

@@ -25,7 +25,7 @@ export const Login = ({ onSwitchToRegister }: LoginProps) => {
     setError('');
     try {
       await auth.login(uuid);
-    } catch (err) {
+    } catch {
       setError('로그인에 실패했습니다. 올바른 UUID인지 확인해주세요.');
     } finally {
       setLoading(false);
