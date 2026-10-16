@@ -25,6 +25,7 @@ import {
   AnswerFeedbackOut,
   submitAnswerFeedback,
   getSessionFeedback,
+  deleteAnswerFeedback,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import { AnswerFeedback } from './AnswerFeedback';
@@ -302,6 +303,17 @@ export const AiService = () => {
     const saved = await submitAnswerFeedback({ sessionId, turnIndex, ...input });
     setFeedbackByTurn((prev) => ({ ...prev, [turnIndex]: saved }));
     showBookmarkToast(isUpdate ? '답변 평가가 수정되었습니다.' : '답변 평가가 저장되었습니다.');
+  };
+
+  const handleDeleteFeedback = async (turnIndex: number) => {
+    if (!sessionId) return;
+    await deleteAnswerFeedback(sessionId, turnIndex);
+    setFeedbackByTurn((prev) => {
+      const next = { ...prev };
+      delete next[turnIndex];
+      return next;
+    });
+    showBookmarkToast('답변 평가가 삭제되었습니다.');
   };
 
   const handleLoadSession = async (sid: string) => {
@@ -1154,6 +1166,7 @@ export const AiService = () => {
                               key={`${sessionId}-${idx}`}
                               existing={feedbackByTurn[idx]}
                               onSubmit={(input) => handleSubmitFeedback(idx, input)}
+                              onDelete={() => handleDeleteFeedback(idx)}
                             />
                           )}
                         </>

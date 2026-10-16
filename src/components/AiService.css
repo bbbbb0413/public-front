@@ -1684,7 +1684,8 @@
 }
 
 .btn-feedback-cancel,
-.btn-feedback-submit {
+.btn-feedback-submit,
+.btn-feedback-delete {
   font-size: 0.75rem;
   font-weight: 500;
   padding: 0.3rem 0.7rem;
@@ -1705,6 +1706,17 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.btn-feedback-delete {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  margin-right: auto;
+}
+
+.btn-feedback-delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .btn-feedback-submit {
   background: #6366f1;
   border: 1px solid #6366f1;
@@ -1716,7 +1728,8 @@
 }
 
 .btn-feedback-cancel:disabled,
-.btn-feedback-submit:disabled {
+.btn-feedback-submit:disabled,
+.btn-feedback-delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

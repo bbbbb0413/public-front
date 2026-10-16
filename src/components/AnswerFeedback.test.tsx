@@ -231,5 +231,77 @@ describe('AnswerFeedback', () => {
     expect(screen.getByRole('textbox')).toHaveValue('');
     expect(screen.getByText('평가 제출')).toBeDisabled();
   });
+
+  it('기존 평가가 없는 경우 평가 등록 폼에 평가 삭제 버튼이 노출되지 않는다 (SPEC-068)', () => {
+    render(<AnswerFeedback onSubmit={vi.fn()} onDelete={vi.fn()} />);
+    open();
+
+    expect(screen.queryByRole('button', { name: '평가 삭제' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '취소' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '평가 제출' })).toBeInTheDocument();
+  });
+
+  it('기존 평가가 있는 경우 수정 폼에 평가 삭제 버튼이 노출된다 (SPEC-068)', () => {
+    render(<AnswerFeedback existing={existing} onSubmit={vi.fn()} onDelete={vi.fn()} />);
+    open();
+
+    expect(screen.getByRole('button', { name: '평가 삭제' })).toBeInTheDocument();
+  });
+
+  it('평가 삭제 클릭 시 onDelete를 호출하고 삭제 진행 중 버튼 비활성화 및 삭제 중…을 표시한다 (SPEC-068)', async () => {
+    let resolveDelete: () => void = () => {};
+    const onDelete = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+
+    render(<AnswerFeedback existing={existing} onSubmit={vi.fn()} onDelete={onDelete} />);
+    open();
+
+    const deleteBtn = screen.getByRole('button', { name: '평가 삭제' });
+    fireEvent.click(deleteBtn);
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '삭제 중…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '취소' })).toBeDisabled();
+
+    resolveDelete();
+    await waitFor(() => {
+      expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+    });
+  });
+
+  it('평가 삭제 성공 시 기본 접힘 상태(이 답변을 평가하기)로 복원된다 (SPEC-068)', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(<AnswerFeedback existing={existing} onSubmit={vi.fn()} onDelete={onDelete} />);
+    open();
+
+    fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('feedback-summary')).not.toBeInTheDocument();
+  });
+
+  it('평가 삭제 실패 시 에러 메시지를 표시하고 입력값을 유지한다 (SPEC-068)', async () => {
+    const onDelete = vi.fn().mockRejectedValue(new Error('delete failed'));
+    render(<AnswerFeedback existing={existing} onSubmit={vi.fn()} onDelete={onDelete} />);
+    open();
+
+    fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-error')).toHaveTextContent(
+        '평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      );
+    });
+    expect(screen.getByLabelText(/^정확도 4점/)).toBeChecked();
+    expect(screen.getByLabelText(/^유용성 5점/)).toBeChecked();
+    expect(screen.getByRole('textbox')).toHaveValue('근거가 좋았다');
+    expect(screen.getByRole('button', { name: '평가 삭제' })).toBeEnabled();
+  });
 });
 
