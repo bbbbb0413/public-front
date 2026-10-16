@@ -29,6 +29,7 @@ import {
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import { AnswerFeedback } from './AnswerFeedback';
+import { formatDateTime } from '../utils/date';
 import { PromptSettingsModal } from './ai/PromptSettingsModal';
 import './AiService.css';
 
@@ -72,6 +73,7 @@ export const AiService = () => {
   const userId = authCtx?.user?.uuid ?? null;
 
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [documentSearchQuery, setDocumentSearchQuery] = useState('');
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState('');
@@ -766,65 +768,106 @@ export const AiService = () => {
             </div>
           </div>
 
+          <div className="doc-search-wrapper">
+            <input
+              type="text"
+              value={documentSearchQuery}
+              onChange={(e) => setDocumentSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setDocumentSearchQuery('');
+                }
+              }}
+              placeholder="문서 검색..."
+              className="doc-search-input"
+            />
+            {documentSearchQuery && (
+              <button
+                type="button"
+                className="doc-search-clear"
+                onClick={() => setDocumentSearchQuery('')}
+                aria-label="문서 검색어 초기화"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
           <div className="document-list-container">
             {loadingDocs ? (
               <div className="loading-spinner">문서 로딩 중...</div>
             ) : documents.length === 0 ? (
               <div className="empty-message">업로드된 문서가 없습니다.</div>
-            ) : (
-              <table className="doc-table">
-                <thead>
-                  <tr>
-                    <th>파일명</th>
-                    <th>상태</th>
-                    <th>청크 수</th>
-                    <th>작업</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.map((doc) => {
-                    const isProcessing = doc.status === 'processing' || doc.status === 'pending' || doc.status === 'queued';
-                    const isFailed = doc.status === 'failed' || doc.status === 'error';
-                    const stepLabel = doc.step ? (STEP_LABELS[doc.step] || doc.step) : null;
-                    const progressText = doc.progress !== undefined ? `${doc.progress}%` : null;
+            ) : (() => {
+              const filteredDocs = documentSearchQuery.trim()
+                ? documents.filter((doc) =>
+                    doc.fileName.toLowerCase().includes(documentSearchQuery.trim().toLowerCase())
+                  )
+                : documents;
 
-                    let statusContent = doc.status;
-                    if (isProcessing && (stepLabel || progressText)) {
-                      statusContent = [stepLabel, progressText].filter(Boolean).join(' ');
-                    }
+              if (filteredDocs.length === 0) {
+                return <div className="empty-message">검색된 문서가 없습니다.</div>;
+              }
 
-                    return (
-                      <tr key={doc.id}>
-                        <td className="doc-name">{doc.fileName}</td>
-                        <td>
-                          <span className={`status-badge ${doc.status}`}>{statusContent}</span>
-                        </td>
-                        <td>{doc.chunkCount}</td>
-                        <td>
-                          <div className="doc-actions">
-                            {isFailed && (
-                              <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
-                            )}
-                            {doc.status === 'completed' && (
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadDocument(doc)}
-                                className="btn-download"
-                                disabled={downloadingDocId === doc.id}
-                                title="문서 다운로드"
-                              >
-                                {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
-                              </button>
-                            )}
-                            <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+              return (
+                <table className="doc-table">
+                  <thead>
+                    <tr>
+                      <th>파일명</th>
+                      <th>상태</th>
+                      <th>청크 수</th>
+                      <th>업로드 일시</th>
+                      <th>작업</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDocs.map((doc) => {
+                      const isProcessing = doc.status === 'processing' || doc.status === 'pending' || doc.status === 'queued';
+                      const isFailed = doc.status === 'failed' || doc.status === 'error';
+                      const stepLabel = doc.step ? (STEP_LABELS[doc.step] || doc.step) : null;
+                      const progressText = doc.progress !== undefined ? `${doc.progress}%` : null;
+
+                      let statusContent = doc.status;
+                      if (isProcessing && (stepLabel || progressText)) {
+                        statusContent = [stepLabel, progressText].filter(Boolean).join(' ');
+                      }
+
+                      const formattedCreatedAt = doc.createdAt ? formatDateTime(doc.createdAt) || '-' : '-';
+
+                      return (
+                        <tr key={doc.id}>
+                          <td className="doc-name">{doc.fileName}</td>
+                          <td>
+                            <span className={`status-badge ${doc.status}`}>{statusContent}</span>
+                          </td>
+                          <td>{doc.chunkCount}</td>
+                          <td className="doc-created-at">{formattedCreatedAt}</td>
+                          <td>
+                            <div className="doc-actions">
+                              {isFailed && (
+                                <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
+                              )}
+                              {doc.status === 'completed' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadDocument(doc)}
+                                  className="btn-download"
+                                  disabled={downloadingDocId === doc.id}
+                                  title="문서 다운로드"
+                                >
+                                  {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
+                                </button>
+                              )}
+                              <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
         </div>
 
