@@ -4113,6 +4113,351 @@ describe('AiService Component', () => {
       expect(screen.queryByText('2번째 답변 청크 스니펫')).not.toBeInTheDocument();
     });
   });
+
+  describe('Session Delete Confirmation Modal (SPEC-058)', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-1', nickName: 'Tester' },
+      token: 'mock-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    const mockSessions = [
+      {
+        sessionId: 'sess-1',
+        title: '환불 규정 문의',
+        isBookmarked: false,
+        updatedAt: '2026-09-12T00:00:00Z',
+      },
+      {
+        sessionId: 'sess-2',
+        title: '',
+        isBookmarked: false,
+        updatedAt: '2026-09-11T00:00:00Z',
+      },
+    ];
+
+    beforeEach(() => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue(mockSessions);
+      vi.mocked(aiApi.deleteSessionById).mockResolvedValue(undefined);
+    });
+
+    it('Given 사용자가 대화 세션 목록을 조회한 상태에서 When 특정 세션의 삭제(✕) 버튼을 클릭하면 Then deleteSessionById API가 즉시 호출되지 않고 세션 삭제 확인 모달이 표시되며 세션 제목과 경고 문구가 노출된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      // API가 즉시 호출되지 않아야 함
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+
+      // 세션 삭제 확인 모달 표시 및 제목/경고 노출
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText('"환불 규정 문의" 대화를 삭제하시겠습니까?')).toBeInTheDocument();
+      expect(screen.getByText(/삭제된 대화는 복구할 수 없으며/i)).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 취소 버튼을 누르면 Then 삭제 API가 호출되지 않고 모달이 닫히며 기존 세션 목록이 그대로 유지된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '취소' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('환불 규정 문의')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 모달 바깥 배경을 클릭하면 Then 삭제 API가 호출되지 않고 모달이 닫힌다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const overlay = screen.getByTestId('session-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 Escape 키를 누르면 Then 삭제 API가 호출되지 않고 모달이 닫힌다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 삭제 버튼을 클릭하면 Then 버튼이 "삭제 중..."으로 바뀌고 비활성화되며 deleteSessionById가 호출되어 성공 시 모달이 닫히고 목록에서 해당 세션이 제거된다', async () => {
+      let resolveDelete: () => void = () => {};
+      vi.mocked(aiApi.deleteSessionById).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDelete = resolve;
+          }),
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      const cancelBtn = modal.querySelector('.btn-cancel-delete') as HTMLButtonElement;
+
+      // 삭제 확인 버튼 클릭
+      act(() => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(aiApi.deleteSessionById).toHaveBeenCalledWith('sess-1');
+      expect(confirmDeleteBtn).toHaveTextContent('삭제 중...');
+      expect(confirmDeleteBtn).toBeDisabled();
+      expect(cancelBtn).toBeDisabled();
+
+      // 비동기 완료
+      await act(async () => {
+        resolveDelete();
+      });
+
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.queryByText('환불 규정 문의')).not.toBeInTheDocument();
+    });
+
+    it('Given 현재 열려 있는 활성 세션에 대해 삭제가 완료되었을 때 When 삭제가 성공하면 Then 대화창이 새 질문 상태로 초기화된다', async () => {
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-1',
+        title: '환불 규정 문의',
+        createdAt: '2026-09-12T00:00:00Z',
+        updatedAt: '2026-09-12T00:00:00Z',
+        turns: [
+          { role: 'user', content: '환불 어떻게 받나요?', createdAt: '2026-09-12T00:00:00Z' },
+          { role: 'assistant', content: '고객센터로 문의하세요.', createdAt: '2026-09-12T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // sess-1 선택하여 대화창에 로드
+      await act(async () => {
+        fireEvent.click(screen.getByText('환불 규정 문의'));
+      });
+
+      expect(screen.getByText('환불 어떻게 받나요?')).toBeInTheDocument();
+
+      // 삭제 버튼 클릭 및 확인
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      // 대화창이 초기화되어 기존 대화 내용이 사라졌는지 확인
+      expect(screen.queryByText('환불 어떻게 받나요?')).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 제목이 빈 문자열("")이거나 없는 세션에 대해 When 삭제 버튼을 클릭하면 Then 확인 모달에 "선택한 대화를 삭제하시겠습니까?"라는 기본 문구가 오류 없이 안전하게 노출된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // sess-2는 title이 ''
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[1]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText('선택한 대화를 삭제하시겠습니까?')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 API 호출 실패 시 When 삭제를 시도하면 Then 확인 모달이 닫히고 상단 에러 배너에 "세션 삭제에 실패했습니다." 에러 메시지가 노출된다', async () => {
+      vi.mocked(aiApi.deleteSessionById).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('세션 삭제에 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 진행 중(isDeletingSession: true)인 상태에서 When 사용자가 Escape 키를 누르거나 배경을 클릭하면 Then 모달이 닫히지 않고 삭제 진행이 유지된다', async () => {
+      let resolveDelete: () => void = () => {};
+      vi.mocked(aiApi.deleteSessionById).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDelete = resolve;
+          }),
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      act(() => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      // Escape 키 입력 시도
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      // 배경 클릭 시도
+      const overlay = screen.getByTestId('session-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      // 완료 후 모달 닫힘
+      await act(async () => {
+        resolveDelete();
+      });
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
+  });
 });
 
 
