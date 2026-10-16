@@ -48,6 +48,7 @@ interface ChatMessage {
   text: string;
   confidence?: number;
   missing?: string[];
+  iterations?: number;
   sources?: SourceRef[];
 }
 
@@ -330,6 +331,7 @@ export const AiService = () => {
         text: t.content,
         confidence: t.confidence,
         missing: t.missing,
+        iterations: t.iterations,
         sources: t.sources,
       }));
       setChatLog(loaded);
@@ -625,6 +627,7 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
+        const iterations = finalMeta?.iterations !== undefined ? finalMeta.iterations : lastProgress?.iteration;
         setChatLog((prev) => [
           ...prev,
           {
@@ -632,6 +635,7 @@ export const AiService = () => {
             text: accumulated,
             confidence,
             missing,
+            iterations,
             sources: receivedSources,
           },
         ]);
@@ -1136,23 +1140,35 @@ export const AiService = () => {
                           >
                             {msg.text}
                           </ReactMarkdown>
-                          {msg.confidence !== undefined && (() => {
-                            const confLevel =
-                              msg.confidence >= 0.8
-                                ? 'confidence-high'
-                                : msg.confidence >= 0.6
-                                  ? 'confidence-medium'
-                                  : 'confidence-low';
-                            return (
-                              <div
-                                className={`confidence-badge ${confLevel}`}
-                                data-testid="confidence-badge"
-                              >
-                                <span className="confidence-label">신뢰도:</span>
-                                <span className="confidence-value">{Math.round(msg.confidence * 100)}%</span>
-                              </div>
-                            );
-                          })()}
+                          {(msg.iterations !== undefined && msg.iterations > 1 || msg.confidence !== undefined) && (
+                            <div className="message-meta-badges">
+                              {msg.iterations !== undefined && msg.iterations > 1 && (
+                                <div
+                                  className="iteration-badge"
+                                  data-testid="iteration-badge"
+                                >
+                                  [{msg.iterations}회 반복 검증]
+                                </div>
+                              )}
+                              {msg.confidence !== undefined && (() => {
+                                const confLevel =
+                                  msg.confidence >= 0.8
+                                    ? 'confidence-high'
+                                    : msg.confidence >= 0.6
+                                      ? 'confidence-medium'
+                                      : 'confidence-low';
+                                return (
+                                  <div
+                                    className={`confidence-badge ${confLevel}`}
+                                    data-testid="confidence-badge"
+                                  >
+                                    <span className="confidence-label">신뢰도:</span>
+                                    <span className="confidence-value">{Math.round(msg.confidence * 100)}%</span>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
                           {msg.missing && msg.missing.length > 0 && (
                             <div className="missing-info" data-testid="missing-info">
                               <span className="missing-label">확인하지 못한 항목:</span>

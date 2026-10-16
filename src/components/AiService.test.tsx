@@ -402,9 +402,11 @@ describe('AiService Component', () => {
     // 진행 상태 바는 사라짐
     expect(screen.queryByTestId('agent-progress')).not.toBeInTheDocument();
 
-    // 최종 신뢰도 및 누락 항목 표시 확인
+    // 최종 신뢰도, 반복 검증 배지 및 누락 항목 표시 확인
     expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
     expect(screen.getByText('85%')).toBeInTheDocument();
+    expect(screen.getByTestId('iteration-badge')).toBeInTheDocument();
+    expect(screen.getByText('[2회 반복 검증]')).toBeInTheDocument();
 
     expect(screen.getByTestId('missing-info')).toBeInTheDocument();
     expect(screen.getByText('결제 취소 정책')).toBeInTheDocument();
@@ -5244,6 +5246,215 @@ describe('AiService Component', () => {
 
       const dashes = screen.getAllByText('-');
       expect(dashes.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Agentic critique metadata (SPEC-044)', () => {
+    it('Given 에이전틱 RAG가 2회 이상 비평 루프를 거쳐 답변을 생성했을 때 When 스트리밍이 완료되고 done 이벤트가 수신되면 Then AI 메시지 버블에 최종 신뢰도와 함께 [N회 반복 검증] 배지가 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('다단계 비평 완료된 답변입니다.');
+            onDone({
+              confidence: 0.92,
+              missing: [],
+              iterations: 3,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '다단계 검증 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('92%')).toBeInTheDocument();
+      expect(screen.getByTestId('iteration-badge')).toBeInTheDocument();
+      expect(screen.getByText('[3회 반복 검증]')).toBeInTheDocument();
+    });
+
+    it('Given 비에이전틱 질의이거나 반복 정보가 없는 레거시 응답을 수신했을 때 When 메시지가 렌더링되면 Then 화면 에러 없이 기존과 동일하게 신뢰도 배지만 정상 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('단발성 질문 답변입니다.');
+            onDone({
+              confidence: 0.88,
+              missing: [],
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '단발성 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(screen.getByTestId('confidence-badge')).toBeInTheDocument();
+      expect(screen.getByText('88%')).toBeInTheDocument();
+      expect(screen.queryByTestId('iteration-badge')).not.toBeInTheDocument();
+    });
+
+    it('Given 신뢰도 및 누락 정보(missing)가 존재하는 경우 When 답변이 화면에 표시되면 Then 반복 회차 배지, 신뢰도 배지, 확인하지 못한 항목 목록이 순서대로 깨짐 없이 정렬되어 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('복합 답변입니다.');
+            onDone({
+              confidence: 0.65,
+              missing: ['항목 A', '항목 B'],
+              iterations: 2,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '복합 질의' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(screen.getByTestId('iteration-badge')).toHaveTextContent('[2회 반복 검증]');
+      expect(screen.getByTestId('confidence-badge')).toHaveTextContent('65%');
+      expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+      expect(screen.getByText('항목 A')).toBeInTheDocument();
+      expect(screen.getByText('항목 B')).toBeInTheDocument();
+    });
+
+    it('Given 세션 상세 조회 시 turns에 iterations가 포함되어 있을 때 When 세션을 불러오면 Then 반복 검증 배지가 올바르게 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-agentic',
+        title: '에이전틱 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '질문입니다',
+            createdAt: '2026-09-21T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '에이전틱 답변입니다',
+            createdAt: '2026-09-21T00:00:01Z',
+            confidence: 0.9,
+            iterations: 4,
+            missing: [],
+          },
+        ],
+        createdAt: '2026-09-21T00:00:00Z',
+        updatedAt: '2026-09-21T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-agentic',
+          title: '에이전틱 세션',
+          updatedAt: '2026-09-21T00:00:01Z',
+        },
+      ]);
+
+      const mockAuth = {
+        user: { uuid: 'test-user-agentic', accountId: 1, nickName: 'testuser' },
+        token: 'test-token',
+        isAuthenticated: true,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+      };
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('에이전틱 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getAllByText('에이전틱 답변입니다').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId('iteration-badge')).toHaveTextContent('[4회 반복 검증]');
+      expect(screen.getByTestId('confidence-badge')).toHaveTextContent('90%');
     });
   });
 });
