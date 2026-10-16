@@ -256,6 +256,64 @@
   box-shadow: 0 6px 16px hsla(250, 80%, 50%, 0.3);
 }
 
+.doc-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.doc-search-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  color: #ffffff;
+  font-size: 0.85rem;
+  outline: none;
+  font-family: inherit;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.doc-search-input:focus {
+  border-color: hsl(265, 80%, 60%);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.doc-search-input::placeholder {
+  color: hsl(210, 10%, 45%);
+}
+
+.doc-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.doc-search-clear:hover {
+  color: #ffffff;
+}
+
+.doc-created-at {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: hsl(210, 10%, 65%);
+}
+
 .document-list-container {
   flex: 1;
   overflow-y: auto;
@@ -338,6 +396,27 @@
 .btn-retry:hover {
   background: hsla(210, 80%, 50%, 0.25);
   border-color: hsl(210, 90%, 70%);
+}
+
+.btn-download {
+  background: hsla(210, 80%, 50%, 0.15);
+  border: 1px solid hsla(210, 80%, 60%, 0.3);
+  color: hsl(210, 90%, 75%);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.btn-download:hover:not(:disabled) {
+  background: hsla(210, 80%, 50%, 0.25);
+  border-color: hsl(210, 90%, 70%);
+}
+
+.btn-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-delete {
@@ -1124,6 +1203,31 @@
   line-height: 1.4;
 }
 
+/* ── 근거 부재 경고 배너 (SPEC-059) ── */
+.ungrounded-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #fbbf24;
+}
+
+.ungrounded-warning-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.ungrounded-warning-text {
+  line-height: 1.35;
+}
+
 /* ── 세션 사이드바 ── */
 .chat-modal {
   display: flex;
@@ -1567,6 +1671,21 @@
   font-weight: 500;
 }
 
+.feedback-summary.feedback-positive,
+.btn-feedback-toggle.rated .feedback-summary.feedback-positive {
+  color: #4ade80;
+}
+
+.feedback-summary.feedback-neutral,
+.btn-feedback-toggle.rated .feedback-summary.feedback-neutral {
+  color: #facc15;
+}
+
+.feedback-summary.feedback-negative,
+.btn-feedback-toggle.rated .feedback-summary.feedback-negative {
+  color: #f87171;
+}
+
 .feedback-edit-hint {
   font-size: 0.7rem;
   color: hsl(210, 10%, 50%);
@@ -1664,6 +1783,13 @@
   border-color: #6366f1;
 }
 
+.feedback-char-count {
+  font-size: 0.7rem;
+  color: hsl(210, 10%, 55%);
+  text-align: right;
+  margin-top: 0.2rem;
+}
+
 .feedback-error {
   margin: 0;
   font-size: 0.75rem;
@@ -1681,7 +1807,8 @@
 }
 
 .btn-feedback-cancel,
-.btn-feedback-submit {
+.btn-feedback-submit,
+.btn-feedback-delete {
   font-size: 0.75rem;
   font-weight: 500;
   padding: 0.3rem 0.7rem;
@@ -1702,6 +1829,17 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.btn-feedback-delete {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  margin-right: auto;
+}
+
+.btn-feedback-delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .btn-feedback-submit {
   background: #6366f1;
   border: 1px solid #6366f1;
@@ -1713,7 +1851,8 @@
 }
 
 .btn-feedback-cancel:disabled,
-.btn-feedback-submit:disabled {
+.btn-feedback-submit:disabled,
+.btn-feedback-delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

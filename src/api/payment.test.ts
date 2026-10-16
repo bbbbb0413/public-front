@@ -98,7 +98,15 @@ describe('payment API', () => {
       data: {
         data: {
           payments: [
-            { paymentId: 101, accountId: 42, amount: 5000, currency: 'KRW', productId: 'gold_500', status: 'COMPLETED' },
+            {
+              paymentId: 101,
+              accountId: 42,
+              amount: 5000,
+              currency: 'KRW',
+              productId: 'gold_500',
+              status: 'COMPLETED',
+              createdAt: '2026-09-12T14:30:00.000Z',
+            },
           ],
           page: 1,
           take: 20,
@@ -115,6 +123,7 @@ describe('payment API', () => {
     expect(result.payments[0].paymentId).toBe(101);
     expect(result.payments[0].accountId).toBe(42);
     expect(result.payments[0].productId).toBe('gold_500');
+    expect(result.payments[0].createdAt).toBe('2026-09-12T14:30:00.000Z');
   });
 });
 

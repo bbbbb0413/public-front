@@ -405,6 +405,14 @@ export const getSessionFeedback = async (
   return response.data ?? [];
 };
 
+/** 등록된 답변 평가 삭제 (SPEC-068) */
+export const deleteAnswerFeedback = async (
+  sessionId: string,
+  turnIndex: number,
+): Promise<void> => {
+  await client.delete('/ai/feedback', { params: { sessionId, turnIndex } });
+};
+
 /** 답변 근거로 인용된 문서의 원본 파일을 blob으로 받아온다. */
 export const getDocumentFile = async (documentId: string): Promise<Blob> => {
   const response = await client.get(`/ai/knowledge/documents/${documentId}/file`, {
