@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
 import { AiService } from './AiService';
@@ -3418,7 +3418,8 @@ describe('AiService Component', () => {
         fireEvent.click(settingBtn);
       });
 
-      const textarea = screen.getByRole('textbox');
+      // 문서 검색 입력(SPEC-063)도 textbox 라 모달 안으로 좁힌다
+      const textarea = within(screen.getByRole('dialog')).getByRole('textbox');
       await act(async () => {
         fireEvent.change(textarea, { target: { value: '내가 새로 작성한 프롬프트' } });
       });
