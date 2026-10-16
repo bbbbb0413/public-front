@@ -28,7 +28,14 @@ interface Props {
     helpfulness: number;
     comment?: string;
   }) => Promise<void>;
+  onSuccess?: (isUpdate: boolean) => void;
 }
+
+const getAccuracyClass = (accuracy: number): string => {
+  if (accuracy >= 4) return 'feedback-positive';
+  if (accuracy === 3) return 'feedback-neutral';
+  return 'feedback-negative';
+};
 
 interface ScaleProps {
   legend: string;
@@ -69,7 +76,7 @@ const RatingScale = ({ legend, name, labels, value, onChange }: ScaleProps) => (
  * 이미 평가한 답변이면 접힌 상태로 결과만 보여주고, 눌러서 다시 고칠 수 있다.
  * 다시 제출하면 서버가 기존 평가를 갱신한다.
  */
-export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
+export const AnswerFeedback = ({ existing, onSubmit, onSuccess }: Props) => {
   const [isOpen, setIsOpen] = useState(false);
   const [accuracy, setAccuracy] = useState<number | null>(existing?.accuracy ?? null);
   const [helpfulness, setHelpfulness] = useState<number | null>(
@@ -79,6 +86,31 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [prevExisting, setPrevExisting] = useState(existing);
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
+    setAccuracy(existing?.accuracy ?? null);
+    setHelpfulness(existing?.helpfulness ?? null);
+    setComment(existing?.comment ?? '');
+  }
+
+  const resetForm = () => {
+    setAccuracy(existing?.accuracy ?? null);
+    setHelpfulness(existing?.helpfulness ?? null);
+    setComment(existing?.comment ?? '');
+    setError(null);
+  };
+
+  const handleOpen = () => {
+    resetForm();
+    setIsOpen(true);
+  };
+
+  const handleCancel = () => {
+    resetForm();
+    setIsOpen(false);
+  };
+
   const canSubmit = accuracy !== null && helpfulness !== null && !saving;
 
   const handleSubmit = async () => {
@@ -86,12 +118,14 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
     setSaving(true);
     setError(null);
     try {
+      const isUpdate = Boolean(existing);
       await onSubmit({
         accuracy,
         helpfulness,
         comment: comment.trim() || undefined,
       });
       setIsOpen(false);
+      onSuccess?.(isUpdate);
     } catch {
       // 네트워크 오류로 평가가 날아가면 사용자는 다시 쓸 마음을 잃는다.
       // 입력값은 그대로 두고 재시도만 안내한다.
@@ -108,9 +142,12 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           <button
             type="button"
             className="btn-feedback-toggle rated"
-            onClick={() => setIsOpen(true)}
+            onClick={handleOpen}
           >
-            <span className="feedback-summary" data-testid="feedback-summary">
+            <span
+              className={`feedback-summary ${getAccuracyClass(existing.accuracy)}`}
+              data-testid="feedback-summary"
+            >
               내 평가 · 정확도 {existing.accuracy}/5 · 유용성 {existing.helpfulness}/5
             </span>
             <span className="feedback-edit-hint">수정</span>
@@ -119,7 +156,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           <button
             type="button"
             className="btn-feedback-toggle"
-            onClick={() => setIsOpen(true)}
+            onClick={handleOpen}
           >
             이 답변을 평가하기
           </button>
@@ -155,6 +192,9 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           placeholder="무엇이 아쉬웠는지 알려주시면 답변 품질을 개선하는 데 씁니다."
           onChange={(e) => setComment(e.target.value)}
         />
+        <span className="feedback-char-count" data-testid="feedback-char-count">
+          {comment.length} / {MAX_COMMENT_LENGTH}자
+        </span>
       </label>
 
       {error && (
@@ -167,7 +207,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
         <button
           type="button"
           className="btn-feedback-cancel"
-          onClick={() => setIsOpen(false)}
+          onClick={handleCancel}
           disabled={saving}
         >
           취소

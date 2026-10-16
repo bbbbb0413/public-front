@@ -1922,9 +1922,9 @@ describe('AiService Component', () => {
       expect(screen.getByText('80%')).toBeInTheDocument();
       expect(screen.getByText('95%')).toBeInTheDocument();
 
-      // 마지막 AI 턴의 출처가 표시되고 이전 AI 턴의 출처는 참고 문서 목록에 노출되지 않음
+      // SPEC-042 이후 각 AI 답변 버블이 자기 턴의 출처를 함께 보여준다
       expect(screen.getByText('turn2_doc.pdf')).toBeInTheDocument();
-      expect(screen.queryByText('turn1_doc.pdf')).not.toBeInTheDocument();
+      expect(screen.getByText('turn1_doc.pdf')).toBeInTheDocument();
     });
 
     it('Given 사용자가 질문만 입력하고 백엔드 처리가 중단되거나 출처 검색 결과가 0건인 대화 턴 When 세션을 저장 및 복원하면 Then sources 가 빈 배열 또는 undefined 로 안전하게 처리된다', async () => {
@@ -3681,6 +3681,437 @@ describe('AiService Component', () => {
         expect(aiApi.getSessions).toHaveBeenLastCalledWith('test-user-1', 1, 50, '매출');
       });
     });
+
+    describe('답변 평가 피드백 토스트 알림', () => {
+      it('답변 평가를 신규 제출하면 "답변 평가가 저장되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-1',
+          title: '피드백 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '피드백 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '피드백 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: '좋습니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        // 세션 로드 (handleLoadSession 호출을 시뮬레이션하거나 getSessions mock 후 아이템 클릭)
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-1', title: '피드백 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '피드백' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('피드백 테스트 세션'));
+        });
+
+        // "이 답변을 평가하기" 버튼 클릭
+        const evalBtn = screen.getByRole('button', { name: /이 답변을 평가하기/i });
+        await act(async () => {
+          fireEvent.click(evalBtn);
+        });
+
+        // 정확도 5점, 유용성 4점 선택
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 4점/));
+        });
+
+        // 제출
+        const submitBtn = screen.getByRole('button', { name: /평가 제출/i });
+        await act(async () => {
+          fireEvent.click(submitBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: undefined,
+        });
+
+        // 토스트 알림 검증
+        expect(screen.getByText('답변 평가가 저장되었습니다.')).toBeInTheDocument();
+      });
+
+      it('기존 평가를 수정하여 제출하면 "답변 평가가 수정되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-2',
+          title: '수정 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '수정 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '수정 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([
+          {
+            sessionId: 'sess-fb-2',
+            turnIndex: 1,
+            accuracy: 3,
+            helpfulness: 3,
+            comment: '보통입니다',
+            createdAt: '2026-10-11T00:00:00Z',
+            updatedAt: '2026-10-11T00:00:00Z',
+          },
+        ]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-2',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 5,
+          comment: '보통입니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T01:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-2', title: '수정 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '수정' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('수정 테스트 세션'));
+        });
+
+        // 수정 버튼 클릭
+        const summaryBtn = screen.getByRole('button', { name: /내 평가/i });
+        await act(async () => {
+          fireEvent.click(summaryBtn);
+        });
+
+        // 정확도 5점 변경 후 수정 제출
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 5점/));
+        });
+
+        const updateBtn = screen.getByRole('button', { name: /평가 수정/i });
+        await act(async () => {
+          fireEvent.click(updateBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalled();
+        expect(screen.getByText('답변 평가가 수정되었습니다.')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Turn-level source citations (SPEC-042)', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('AC 1: Given 1번째 질문에 참고 문서 A가 표시된 후 2번째 질문에 참고 문서 B를 수신할 때 Then 1번째 답변에는 A가 유지되고 2번째 답변에는 B가 독립적으로 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSourcesTurn1: aiApi.SourceRef[] = [
+        { fileName: 'turn1_source.pdf', chunkIndex: 0, documentId: 'doc-t1', snippet: '1번째 출처 스니펫' },
+      ];
+      const mockSourcesTurn2: aiApi.SourceRef[] = [
+        { fileName: 'turn2_source.pdf', chunkIndex: 0, documentId: 'doc-t2', snippet: '2번째 출처 스니펫' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream)
+        .mockImplementationOnce((_q, onMessage, onDone, _err, _uid, _chat, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSourcesTurn1);
+            onMessage('첫 번째 답변입니다.');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        })
+        .mockImplementationOnce((_q, onMessage, onDone, _err, _uid, _chat, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSourcesTurn2);
+            onMessage('두 번째 답변입니다.');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 1번째 질문 전송
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '1번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByText('turn1_source.pdf')).toBeInTheDocument();
+
+      // 2번째 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '2번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 1번째 답변의 출처와 2번째 답변의 출처가 둘 다 독립적으로 존재해야 함
+      expect(screen.getByText('turn1_source.pdf')).toBeInTheDocument();
+      expect(screen.getByText('turn2_source.pdf')).toBeInTheDocument();
+    });
+
+    it('AC 2: Given 여러 턴의 질문-답변 및 출처가 저장된 대화 세션 복원 시 Then 모든 AI 메시지 버블에 각 턴의 참고 문서가 올바르게 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'multi-turn-sess', title: '다중 턴 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'multi-turn-sess',
+        title: '다중 턴 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문 1',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 1',
+            createdAt: '2026-09-20T00:00:01Z',
+            sources: [
+              { fileName: 'restored_turn1.pdf', chunkIndex: 0, documentId: 'r-t1', snippet: '복원된 출처 1' },
+            ],
+          },
+          {
+            role: 'user',
+            content: '질문 2',
+            createdAt: '2026-09-20T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 2',
+            createdAt: '2026-09-20T00:00:03Z',
+            sources: [
+              { fileName: 'restored_turn2.pdf', chunkIndex: 0, documentId: 'r-t2', snippet: '복원된 출처 2' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('다중 턴 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 두 턴의 출처가 모두 복원되어 화면에 표시되어야 함
+      expect(screen.getByText('restored_turn1.pdf')).toBeInTheDocument();
+      expect(screen.getByText('restored_turn2.pdf')).toBeInTheDocument();
+    });
+
+    it('AC 3: Given 출처 정보가 없거나 빈 배열인 AI 메시지 버블인 경우 When 렌더링될 때 Then 에러 없이 참고 문서 영역이 생략된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'no-source-sess', title: '출처 없는 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'no-source-sess',
+        title: '출처 없는 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '단발 질문',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '단발 답변',
+            createdAt: '2026-09-20T00:00:01Z',
+            confidence: 0.8,
+            sources: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('출처 없는 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getAllByText('단발 답변').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText('참고 문서')).not.toBeInTheDocument();
+    });
+
+    it('AC 4: Given 특정 AI 메시지 버블의 참고 문서를 펼칠 때 When 청크 목록이 펼쳐져도 Then 다른 메시지 버블의 참고 문서 펼침 상태에 영향을 주지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'isolated-toggle-sess', title: '독립 토글 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'isolated-toggle-sess',
+        title: '독립 토글 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문 1',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 1',
+            createdAt: '2026-09-20T00:00:01Z',
+            sources: [
+              { fileName: 'same_name.pdf', chunkIndex: 0, documentId: 'same-doc-id', snippet: '1번째 답변 청크 스니펫' },
+            ],
+          },
+          {
+            role: 'user',
+            content: '질문 2',
+            createdAt: '2026-09-20T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 2',
+            createdAt: '2026-09-20T00:00:03Z',
+            sources: [
+              { fileName: 'same_name.pdf', chunkIndex: 0, documentId: 'same-doc-id', snippet: '2번째 답변 청크 스니펫' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('독립 토글 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const toggleButtons = screen.getAllByRole('button', { name: /same_name\.pdf/i });
+      expect(toggleButtons).toHaveLength(2);
+
+      // 처음에는 둘 다 스니펫이 닫혀 있음
+      expect(screen.queryByText('1번째 답변 청크 스니펫')).not.toBeInTheDocument();
+      expect(screen.queryByText('2번째 답변 청크 스니펫')).not.toBeInTheDocument();
+
+      // 1번째 메시지의 문서만 펼침
+      await act(async () => {
+        fireEvent.click(toggleButtons[0]);
+      });
+
+      expect(screen.getByText('1번째 답변 청크 스니펫')).toBeInTheDocument();
+      expect(screen.queryByText('2번째 답변 청크 스니펫')).not.toBeInTheDocument();
+    });
   });
 
   describe('Session Delete Confirmation Modal (SPEC-058)', () => {
@@ -4028,5 +4459,6 @@ describe('AiService Component', () => {
     });
   });
 });
+
 
 
