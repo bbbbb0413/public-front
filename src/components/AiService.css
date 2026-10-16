@@ -340,6 +340,27 @@
   border-color: hsl(210, 90%, 70%);
 }
 
+.btn-download {
+  background: hsla(210, 80%, 50%, 0.15);
+  border: 1px solid hsla(210, 80%, 60%, 0.3);
+  color: hsl(210, 90%, 75%);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.btn-download:hover:not(:disabled) {
+  background: hsla(210, 80%, 50%, 0.25);
+  border-color: hsl(210, 90%, 70%);
+}
+
+.btn-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-delete {
   background: transparent;
   border: 1px solid hsla(350, 85%, 50%, 0.3);
@@ -1573,6 +1594,21 @@
   font-weight: 500;
 }
 
+.feedback-summary.feedback-positive,
+.btn-feedback-toggle.rated .feedback-summary.feedback-positive {
+  color: #4ade80;
+}
+
+.feedback-summary.feedback-neutral,
+.btn-feedback-toggle.rated .feedback-summary.feedback-neutral {
+  color: #facc15;
+}
+
+.feedback-summary.feedback-negative,
+.btn-feedback-toggle.rated .feedback-summary.feedback-negative {
+  color: #f87171;
+}
+
 .feedback-edit-hint {
   font-size: 0.7rem;
   color: hsl(210, 10%, 50%);
@@ -1670,6 +1706,13 @@
   border-color: #6366f1;
 }
 
+.feedback-char-count {
+  font-size: 0.7rem;
+  color: hsl(210, 10%, 55%);
+  text-align: right;
+  margin-top: 0.2rem;
+}
+
 .feedback-error {
   margin: 0;
   font-size: 0.75rem;
@@ -1687,7 +1730,8 @@
 }
 
 .btn-feedback-cancel,
-.btn-feedback-submit {
+.btn-feedback-submit,
+.btn-feedback-delete {
   font-size: 0.75rem;
   font-weight: 500;
   padding: 0.3rem 0.7rem;
@@ -1708,6 +1752,17 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.btn-feedback-delete {
+  background: none;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  margin-right: auto;
+}
+
+.btn-feedback-delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .btn-feedback-submit {
   background: #6366f1;
   border: 1px solid #6366f1;
@@ -1719,7 +1774,8 @@
 }
 
 .btn-feedback-cancel:disabled,
-.btn-feedback-submit:disabled {
+.btn-feedback-submit:disabled,
+.btn-feedback-delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

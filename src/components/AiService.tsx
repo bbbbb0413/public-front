@@ -16,25 +16,20 @@ import {
   createBookmark,
   deleteBookmark,
   subscribeIngestJob,
-  getMyPrompt,
-  getMyPromptList,
-  saveMyPrompt,
-  activateMyPrompt,
-  resetMyPrompt,
-  deleteMyPromptVersion,
   getDocumentFile,
   SourceRef,
   SessionOut,
   BookmarkItem,
   AgentProgress,
   AgentPhase,
-  MyPromptOut,
   AnswerFeedbackOut,
   submitAnswerFeedback,
   getSessionFeedback,
+  deleteAnswerFeedback,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import { AnswerFeedback } from './AnswerFeedback';
+import { PromptSettingsModal } from './ai/PromptSettingsModal';
 import './AiService.css';
 
 interface DocumentInfo {
@@ -109,19 +104,13 @@ export const AiService = () => {
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
-  const [myPrompt, setMyPrompt] = useState<MyPromptOut | null>(null);
-  const [promptList, setPromptList] = useState<MyPromptOut[]>([]);
-  const [promptDraft, setPromptDraft] = useState('');
-  const [promptLoading, setPromptLoading] = useState(false);
-  const [promptSaving, setPromptSaving] = useState(false);
-  const [promptError, setPromptError] = useState('');
-  const [promptSuccessMsg, setPromptSuccessMsg] = useState('');
-
-  const isMyCustomPrompt = Boolean(myPrompt?.userId);
-  const isSlotLimitReached = promptList.length >= 10;
 
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
+
+  const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
 
   const showBookmarkToast = (msg: string) => {
     setBookmarkSuccessMsg(msg);
@@ -228,10 +217,10 @@ export const AiService = () => {
     }
   };
 
-  const toggleGroup = (documentId: string) => {
+  const toggleGroup = (groupKey: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
-      [documentId]: !prev[documentId],
+      [groupKey]: !prev[groupKey],
     }));
   };
 
@@ -312,8 +301,21 @@ export const AiService = () => {
     input: { accuracy: number; helpfulness: number; comment?: string },
   ) => {
     if (!sessionId) return;
+    const isUpdate = Boolean(feedbackByTurn[turnIndex]);
     const saved = await submitAnswerFeedback({ sessionId, turnIndex, ...input });
     setFeedbackByTurn((prev) => ({ ...prev, [turnIndex]: saved }));
+    showBookmarkToast(isUpdate ? '답변 평가가 수정되었습니다.' : '답변 평가가 저장되었습니다.');
+  };
+
+  const handleDeleteFeedback = async (turnIndex: number) => {
+    if (!sessionId) return;
+    await deleteAnswerFeedback(sessionId, turnIndex);
+    setFeedbackByTurn((prev) => {
+      const next = { ...prev };
+      delete next[turnIndex];
+      return next;
+    });
+    showBookmarkToast('답변 평가가 삭제되었습니다.');
   };
 
   const handleLoadSession = async (sid: string) => {
@@ -332,10 +334,7 @@ export const AiService = () => {
       await loadFeedback(detail.sessionId);
       setStreamingAnswer('');
       streamingAnswerRef.current = '';
-      const lastAiTurnWithSources = [...detail.turns]
-        .reverse()
-        .find((t) => t.role === 'assistant' && t.sources && t.sources.length > 0);
-      setCurrentSources(lastAiTurnWithSources?.sources ?? []);
+      setCurrentSources([]);
       setExpandedGroups({});
       setCurrentProgress(null);
       setCopiedIndex(null);
@@ -344,14 +343,30 @@ export const AiService = () => {
     }
   };
 
-  const handleDeleteSession = async (sid: string, e: React.MouseEvent) => {
+  const handleDeleteSessionClick = (session: SessionOut, e: React.MouseEvent) => {
     e.stopPropagation();
+    setDeletingSession({ sessionId: session.sessionId, title: session.title });
+  };
+
+  const handleCancelDeleteSession = () => {
+    if (isDeletingSession) return;
+    setDeletingSession(null);
+  };
+
+  const handleConfirmDeleteSession = async () => {
+    if (!deletingSession || isDeletingSession) return;
+    const sid = deletingSession.sessionId;
+    setIsDeletingSession(true);
     try {
       await deleteSessionById(sid);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sid));
       if (sessionId === sid) handleNewChat();
+      setDeletingSession(null);
     } catch {
       setErrorMsg('세션 삭제에 실패했습니다.');
+      setDeletingSession(null);
+    } finally {
+      setIsDeletingSession(false);
     }
   };
 
@@ -496,6 +511,37 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingDoc, isDeleting]);
 
+  const handleDownloadDocument = async (doc: DocumentInfo) => {
+    if (downloadingDocId) return;
+    setDownloadingDocId(doc.id);
+    try {
+      const blob = await getDocumentFile(doc.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setErrorMsg('문서 다운로드에 실패했습니다.');
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!deletingSession) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDeletingSession) {
+        setDeletingSession(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deletingSession, isDeletingSession]);
+
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
   };
@@ -522,107 +568,8 @@ export const AiService = () => {
     }
   };
 
-  const refreshPromptData = async () => {
-    const [p, list] = await Promise.all([
-      getMyPrompt(),
-      getMyPromptList(),
-    ]);
-    setMyPrompt(p);
-    setPromptList(list);
-    return { p, list };
-  };
-
-  const handleOpenPromptSettings = async () => {
+  const handleOpenPromptSettings = () => {
     setIsPromptSettingsOpen(true);
-    setPromptError('');
-    setPromptSuccessMsg('');
-    setPromptLoading(true);
-    try {
-      const { p } = await refreshPromptData();
-      setPromptDraft(p.content);
-    } catch {
-      setPromptError('프롬프트를 불러오는 데 실패했습니다.');
-    } finally {
-      setPromptLoading(false);
-    }
-  };
-
-  const handleSavePrompt = async () => {
-    if (!promptDraft.trim()) {
-      setPromptError('프롬프트 내용을 입력하세요.');
-      return;
-    }
-    if (isSlotLimitReached) {
-      setPromptError('개인 프롬프트는 최대 10개까지 저장할 수 있습니다. 기존 슬롯을 삭제한 후 다시 시도하세요.');
-      return;
-    }
-    setPromptSaving(true);
-    setPromptError('');
-    setPromptSuccessMsg('');
-    try {
-      await saveMyPrompt(promptDraft.trim(), true);
-      const { p } = await refreshPromptData();
-      setPromptDraft(p.content);
-      setPromptSuccessMsg('새 프롬프트 슬롯이 저장되고 활성화되었습니다.');
-    } catch (error) {
-      const err = error as { response?: { data?: { message?: unknown } } };
-      const serverMessage = err.response?.data?.message;
-      setPromptError(typeof serverMessage === 'string' ? serverMessage : '프롬프트 저장에 실패했습니다.');
-    } finally {
-      setPromptSaving(false);
-    }
-  };
-
-  const handleActivateSlot = async (version: number) => {
-    setPromptSaving(true);
-    setPromptError('');
-    setPromptSuccessMsg('');
-    try {
-      await activateMyPrompt(version);
-      const { p } = await refreshPromptData();
-      setPromptDraft(p.content);
-      setPromptSuccessMsg('프롬프트가 활성화되었습니다.');
-    } catch (error) {
-      const err = error as { response?: { data?: { message?: unknown } } };
-      const serverMessage = err.response?.data?.message;
-      setPromptError(typeof serverMessage === 'string' ? serverMessage : '프롬프트 활성화에 실패했습니다.');
-    } finally {
-      setPromptSaving(false);
-    }
-  };
-
-  const handleDeleteSlot = async (version: number) => {
-    setPromptSaving(true);
-    setPromptError('');
-    setPromptSuccessMsg('');
-    try {
-      await deleteMyPromptVersion(version);
-      const { p } = await refreshPromptData();
-      setPromptDraft(p.content);
-      setPromptSuccessMsg('프롬프트 슬롯이 삭제되었습니다.');
-    } catch (error) {
-      const err = error as { response?: { data?: { message?: unknown } } };
-      const serverMessage = err.response?.data?.message;
-      setPromptError(typeof serverMessage === 'string' ? serverMessage : '프롬프트 삭제에 실패했습니다.');
-    } finally {
-      setPromptSaving(false);
-    }
-  };
-
-  const handleResetPrompt = async () => {
-    setPromptSaving(true);
-    setPromptError('');
-    setPromptSuccessMsg('');
-    try {
-      await resetMyPrompt();
-      const { p } = await refreshPromptData();
-      setPromptDraft(p.content);
-      setPromptSuccessMsg('기본 프롬프트로 초기화되었습니다.');
-    } catch {
-      setPromptError('프롬프트 초기화에 실패했습니다.');
-    } finally {
-      setPromptSaving(false);
-    }
   };
 
   const handleCancelStreaming = async () => {
@@ -688,6 +635,7 @@ export const AiService = () => {
         ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
+        setCurrentSources([]);
         setCurrentProgress(null);
         setIsStreaming(false);
         if (userId) fetchSessions();
@@ -697,6 +645,7 @@ export const AiService = () => {
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
+        setCurrentSources([]);
         setCurrentProgress(null);
         setIsStreaming(false);
       },
@@ -855,6 +804,17 @@ export const AiService = () => {
                           <div className="doc-actions">
                             {isFailed && (
                               <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
+                            )}
+                            {doc.status === 'completed' && (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadDocument(doc)}
+                                className="btn-download"
+                                disabled={downloadingDocId === doc.id}
+                                title="문서 다운로드"
+                              >
+                                {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
+                              </button>
                             )}
                             <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
                           </div>
@@ -1033,8 +993,8 @@ export const AiService = () => {
                             </button>
                             <button
                               className="btn-delete-session"
-                              onClick={(e) => handleDeleteSession(s.sessionId, e)}
-                              aria-label={`${s.title} 삭제`}
+                              onClick={(e) => handleDeleteSessionClick(s, e)}
+                              aria-label={s.title ? `${s.title} 삭제` : '세션 삭제'}
                               title="삭제"
                             >
                               ✕
@@ -1162,6 +1122,83 @@ export const AiService = () => {
                               </ul>
                             </div>
                           )}
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div className="source-refs">
+                              <span className="source-refs-label">참고 문서</span>
+                              <ul className="source-refs-list">
+                                {groupSourcesByDocument(msg.sources).map((group) => {
+                                  const groupKey = `${idx}-${group.documentId}`;
+                                  const isExpanded = !!expandedGroups[groupKey];
+                                  return (
+                                    <li key={group.documentId} className="source-ref-item-container">
+                                      <button
+                                        type="button"
+                                        className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
+                                        onClick={() => toggleGroup(groupKey)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            toggleGroup(groupKey);
+                                          }
+                                        }}
+                                        aria-expanded={isExpanded}
+                                      >
+                                        <span className="source-ref-name">{group.fileName}</span>
+                                        <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
+                                        {typeof group.maxScore === 'number' && (
+                                          <span className="source-ref-score">
+                                            최고 관련도 {Math.round(group.maxScore * 100)}%
+                                          </span>
+                                        )}
+                                        <span className="source-ref-toggle-icon" aria-hidden="true">
+                                          {isExpanded ? '▲' : '▼'}
+                                        </span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="source-ref-view-btn"
+                                        onClick={() => handleViewSourceFile(group.documentId)}
+                                        disabled={viewingFileId === group.documentId}
+                                      >
+                                        {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
+                                      </button>
+                                      {isExpanded && (
+                                        <ul className="source-group-chunks">
+                                          {group.chunks.map((chunk) => (
+                                            <li key={chunk.chunkIndex} className="source-chunk-item">
+                                              <div className="source-chunk-meta">
+                                                <span className="source-ref-chunk">
+                                                  청크 {chunk.chunkIndex}
+                                                </span>
+                                                {typeof chunk.score === 'number' && (
+                                                  <span className="source-ref-score">
+                                                    관련도 {Math.round(chunk.score * 100)}%
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {chunk.snippet && (
+                                                <div
+                                                  className="source-ref-snippet"
+                                                  data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
+                                                >
+                                                  {chunk.snippet}
+                                                </div>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                              {fileViewError && (
+                                <div className="source-ref-file-error" role="alert">
+                                  {fileViewError}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="message-actions">
                             {sessionId && (
                               <button
@@ -1187,6 +1224,7 @@ export const AiService = () => {
                               key={`${sessionId}-${idx}`}
                               existing={feedbackByTurn[idx]}
                               onSubmit={(input) => handleSubmitFeedback(idx, input)}
+                              onDelete={() => handleDeleteFeedback(idx)}
                             />
                           )}
                         </>
@@ -1223,83 +1261,84 @@ export const AiService = () => {
                       ) : (
                         !currentProgress && <span className="cursor">|</span>
                       )}
-                    </div>
-                  </div>
-                )}
-                {!isStreaming && currentSources.length > 0 && (
-                  <div className="source-refs">
-                    <span className="source-refs-label">참고 문서</span>
-                    <ul className="source-refs-list">
-                      {groupSourcesByDocument(currentSources).map((group) => {
-                        const isExpanded = !!expandedGroups[group.documentId];
-                        return (
-                          <li key={group.documentId} className="source-ref-item-container">
-                            <button
-                              type="button"
-                              className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
-                              onClick={() => toggleGroup(group.documentId)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  toggleGroup(group.documentId);
-                                }
-                              }}
-                              aria-expanded={isExpanded}
-                            >
-                              <span className="source-ref-name">{group.fileName}</span>
-                              <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
-                              {typeof group.maxScore === 'number' && (
-                                <span className="source-ref-score">
-                                  최고 관련도 {Math.round(group.maxScore * 100)}%
-                                </span>
-                              )}
-                              <span className="source-ref-toggle-icon" aria-hidden="true">
-                                {isExpanded ? '▲' : '▼'}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              className="source-ref-view-btn"
-                              onClick={() => handleViewSourceFile(group.documentId)}
-                              disabled={viewingFileId === group.documentId}
-                            >
-                              {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
-                            </button>
-                            {isExpanded && (
-                              <ul className="source-group-chunks">
-                                {group.chunks.map((chunk) => (
-                                  <li key={chunk.chunkIndex} className="source-chunk-item">
-                                    <div className="source-chunk-meta">
-                                      <span className="source-ref-chunk">
-                                        청크 {chunk.chunkIndex}
+                      {currentSources.length > 0 && (
+                        <div className="source-refs">
+                          <span className="source-refs-label">참고 문서</span>
+                          <ul className="source-refs-list">
+                            {groupSourcesByDocument(currentSources).map((group) => {
+                              const groupKey = `streaming-${group.documentId}`;
+                              const isExpanded = !!expandedGroups[groupKey];
+                              return (
+                                <li key={group.documentId} className="source-ref-item-container">
+                                  <button
+                                    type="button"
+                                    className={`source-ref-item${isExpanded ? ' expanded' : ''}`}
+                                    onClick={() => toggleGroup(groupKey)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        toggleGroup(groupKey);
+                                      }
+                                    }}
+                                    aria-expanded={isExpanded}
+                                  >
+                                    <span className="source-ref-name">{group.fileName}</span>
+                                    <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
+                                    {typeof group.maxScore === 'number' && (
+                                      <span className="source-ref-score">
+                                        최고 관련도 {Math.round(group.maxScore * 100)}%
                                       </span>
-                                      {typeof chunk.score === 'number' && (
-                                        <span className="source-ref-score">
-                                          관련도 {Math.round(chunk.score * 100)}%
-                                        </span>
-                                      )}
-                                    </div>
-                                    {chunk.snippet && (
-                                      <div
-                                        className="source-ref-snippet"
-                                        data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
-                                      >
-                                        {chunk.snippet}
-                                      </div>
                                     )}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    {fileViewError && (
-                      <div className="source-ref-file-error" role="alert">
-                        {fileViewError}
-                      </div>
-                    )}
+                                    <span className="source-ref-toggle-icon" aria-hidden="true">
+                                      {isExpanded ? '▲' : '▼'}
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="source-ref-view-btn"
+                                    onClick={() => handleViewSourceFile(group.documentId)}
+                                    disabled={viewingFileId === group.documentId}
+                                  >
+                                    {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
+                                  </button>
+                                  {isExpanded && (
+                                    <ul className="source-group-chunks">
+                                      {group.chunks.map((chunk) => (
+                                        <li key={chunk.chunkIndex} className="source-chunk-item">
+                                          <div className="source-chunk-meta">
+                                            <span className="source-ref-chunk">
+                                              청크 {chunk.chunkIndex}
+                                            </span>
+                                            {typeof chunk.score === 'number' && (
+                                              <span className="source-ref-score">
+                                                관련도 {Math.round(chunk.score * 100)}%
+                                              </span>
+                                            )}
+                                          </div>
+                                          {chunk.snippet && (
+                                            <div
+                                              className="source-ref-snippet"
+                                              data-testid={`source-snippet-${group.documentId}-${chunk.chunkIndex}`}
+                                            >
+                                              {chunk.snippet}
+                                            </div>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          {fileViewError && (
+                            <div className="source-ref-file-error" role="alert">
+                              {fileViewError}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
                 <div ref={messagesEndRef} />
@@ -1347,236 +1386,10 @@ export const AiService = () => {
       )}
 
       {/* 내 시스템 프롬프트 설정 모달 */}
-      {isPromptSettingsOpen && (
-        <div
-          className="chat-modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsPromptSettingsOpen(false);
-          }}
-          role="presentation"
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="prompt-settings-title"
-            style={{
-              background: '#1e293b',
-              borderRadius: 12,
-              padding: 28,
-              width: 560,
-              maxWidth: '90vw',
-              border: '1px solid #334155',
-            }}
-          >
-            <h3 id="prompt-settings-title" style={{ color: '#f1f5f9', marginBottom: 4, fontSize: 18, fontWeight: 700 }}>
-              AI 답변 스타일 설정
-            </h3>
-            <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16 }}>
-              AI가 답변할 때 따르는 시스템 프롬프트를 내 취향에 맞게 바꿀 수 있습니다. 저장하면 내 질문에만 적용되고, 다른 사용자에게는 영향을 주지 않습니다.
-            </p>
-
-            {promptError && (
-              <div style={{ background: '#450a0a', border: '1px solid #991b1b', borderRadius: 6, padding: '10px 12px', color: '#fca5a5', fontSize: 13, marginBottom: 12 }}>
-                {promptError}
-              </div>
-            )}
-            {promptSuccessMsg && (
-              <div style={{ background: '#052e16', border: '1px solid #166534', borderRadius: 6, padding: '10px 12px', color: '#86efac', fontSize: 13, marginBottom: 12 }}>
-                {promptSuccessMsg}
-              </div>
-            )}
-
-            {promptLoading ? (
-              <div style={{ color: '#94a3b8', fontSize: 13, padding: '24px 0', textAlign: 'center' }}>
-                불러오는 중...
-              </div>
-            ) : (
-              <>
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: 11,
-                        background: isMyCustomPrompt ? '#052e16' : '#1e3a5f',
-                        color: isMyCustomPrompt ? '#86efac' : '#93c5fd',
-                      }}
-                    >
-                      {isMyCustomPrompt ? '내 커스텀 설정 사용 중' : '기본값 사용 중'}
-                    </span>
-                    <span style={{ fontSize: 12, color: promptList.length >= 10 ? '#fca5a5' : '#94a3b8' }}>
-                      저장된 프롬프트 목록 ({promptList.length} / 10)
-                    </span>
-                  </div>
-
-                  {promptList.length > 0 && (
-                    <div
-                      style={{
-                        maxHeight: 180,
-                        overflowY: 'auto',
-                        border: '1px solid #334155',
-                        borderRadius: 6,
-                        background: '#0f172a',
-                        marginBottom: 16,
-                      }}
-                    >
-                      {promptList.map((slot, idx) => {
-                        const isSlotActive = slot.isActive;
-                        return (
-                          <div
-                            key={slot.id || `slot-${slot.version}`}
-                            style={{
-                              padding: '8px 12px',
-                              borderBottom: idx !== promptList.length - 1 ? '1px solid #1e293b' : 'none',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              background: isSlotActive ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: '#f1f5f9', whiteSpace: 'nowrap' }}>
-                                슬롯 {idx + 1} (v{slot.version})
-                              </span>
-                              {isSlotActive ? (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    padding: '1px 6px',
-                                    borderRadius: 3,
-                                    background: '#052e16',
-                                    color: '#86efac',
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  활성
-                                </span>
-                              ) : (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    padding: '1px 6px',
-                                    borderRadius: 3,
-                                    background: '#334155',
-                                    color: '#94a3b8',
-                                  }}
-                                >
-                                  비활성
-                                </span>
-                              )}
-                              <span
-                                style={{
-                                  fontSize: 12,
-                                  color: '#94a3b8',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  maxWidth: 200,
-                                }}
-                                title={slot.content}
-                              >
-                                {slot.content}
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                              {!isSlotActive && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleActivateSlot(slot.version)}
-                                  disabled={promptSaving}
-                                  style={{
-                                    padding: '3px 8px',
-                                    background: '#312e81',
-                                    border: 'none',
-                                    borderRadius: 4,
-                                    color: '#c7d2fe',
-                                    cursor: promptSaving ? 'not-allowed' : 'pointer',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  v{slot.version} 활성화
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSlot(slot.version)}
-                                disabled={promptSaving}
-                                style={{
-                                  padding: '3px 8px',
-                                  background: '#450a0a',
-                                  border: 'none',
-                                  borderRadius: 4,
-                                  color: '#fca5a5',
-                                  cursor: promptSaving ? 'not-allowed' : 'pointer',
-                                  fontSize: 11,
-                                }}
-                              >
-                                v{slot.version} 삭제
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {isSlotLimitReached && (
-                    <div style={{ background: '#450a0a', border: '1px solid #991b1b', borderRadius: 6, padding: '8px 12px', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>
-                      개인 프롬프트는 최대 10개까지 저장할 수 있습니다. 기존 슬롯을 삭제한 후 새로운 프롬프트를 저장하세요.
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ marginBottom: 6, fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
-                  새 프롬프트 작성 및 저장
-                </div>
-                <textarea
-                  value={promptDraft}
-                  onChange={(e) => setPromptDraft(e.target.value)}
-                  rows={8}
-                  disabled={promptSaving}
-                  style={{ width: '100%', padding: '9px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f1f5f9', fontSize: 13, boxSizing: 'border-box', resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.6, marginBottom: 16 }}
-                />
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={() => setIsPromptSettingsOpen(false)}
-                    disabled={promptSaving}
-                    style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: '#94a3b8', cursor: 'pointer', fontSize: 13 }}
-                  >
-                    닫기
-                  </button>
-                  {isMyCustomPrompt && (
-                    <button
-                      onClick={handleResetPrompt}
-                      disabled={promptSaving}
-                      style={{ padding: '8px 16px', background: '#450a0a', border: 'none', borderRadius: 6, color: '#fca5a5', cursor: 'pointer', fontSize: 13 }}
-                    >
-                      기본값으로 초기화
-                    </button>
-                  )}
-                  <button
-                    onClick={handleSavePrompt}
-                    disabled={promptSaving || isSlotLimitReached}
-                    style={{
-                      padding: '8px 16px',
-                      background: promptSaving || isSlotLimitReached ? '#334155' : '#6366f1',
-                      border: 'none',
-                      borderRadius: 6,
-                      color: '#fff',
-                      cursor: promptSaving || isSlotLimitReached ? 'not-allowed' : 'pointer',
-                      fontSize: 13,
-                    }}
-                  >
-                    {promptSaving ? '저장 중...' : '새 슬롯으로 저장 및 적용'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <PromptSettingsModal
+        isOpen={isPromptSettingsOpen}
+        onClose={() => setIsPromptSettingsOpen(false)}
+      />
 
       {/* 문서 삭제 확인 모달 */}
       {deletingDoc && (
@@ -1621,6 +1434,55 @@ export const AiService = () => {
                 disabled={isDeleting}
               >
                 {isDeleting ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 세션 삭제 확인 모달 (SPEC-058) */}
+      {deletingSession && (
+        <div
+          className="chat-modal-overlay"
+          data-testid="session-delete-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeletingSession) handleCancelDeleteSession();
+          }}
+          role="presentation"
+        >
+          <div
+            className="delete-confirm-modal session-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-delete-confirm-title"
+          >
+            <h3 id="session-delete-confirm-title" className="delete-confirm-title">
+              대화 삭제 확인
+            </h3>
+            <p className="delete-confirm-message">
+              {deletingSession.title
+                ? `"${deletingSession.title}" 대화를 삭제하시겠습니까?`
+                : '선택한 대화를 삭제하시겠습니까?'}
+            </p>
+            <p className="delete-confirm-warning">
+              삭제된 대화는 복구할 수 없으며 대화 기록에서 영구히 제거됩니다.
+            </p>
+            <div className="delete-confirm-actions">
+              <button
+                type="button"
+                className="btn-cancel-delete"
+                onClick={handleCancelDeleteSession}
+                disabled={isDeletingSession}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn-confirm-delete"
+                onClick={handleConfirmDeleteSession}
+                disabled={isDeletingSession}
+              >
+                {isDeletingSession ? '삭제 중...' : '삭제'}
               </button>
             </div>
           </div>

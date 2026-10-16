@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
 import { AiService } from './AiService';
 import { AuthContext } from '../context/AuthContext';
@@ -18,6 +18,7 @@ vi.mock('../api/ai', () => {
     getDocumentFile: vi.fn(),
     submitAnswerFeedback: vi.fn(),
     getSessionFeedback: vi.fn().mockResolvedValue([]),
+    deleteAnswerFeedback: vi.fn(),
     toggleSessionBookmark: vi.fn(),
     getBookmarks: vi.fn().mockResolvedValue([]),
     createBookmark: vi.fn(),
@@ -1805,6 +1806,177 @@ describe('AiService Component', () => {
       });
     });
 
+    it('Given 사용자가 이미 답변을 평가한 상태에서 When 평가 삭제를 클릭하면 Then DELETE /ai/feedback이 호출되고 피드백 상태가 초기화된다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-1', title: '평가 삭제할 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-1',
+        title: '평가 삭제할 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 5,
+          comment: '좋음',
+          createdAt: '2026-08-28T01:00:00Z',
+          updatedAt: '2026-08-28T01:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteAnswerFeedback).mockResolvedValue(undefined);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('평가 삭제할 세션'));
+      });
+
+      // 기존 평가 요약 확인
+      expect(screen.getByTestId('feedback-summary')).toHaveTextContent('정확도 4/5 · 유용성 5/5');
+
+      // 수정 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('feedback-summary'));
+      });
+
+      // 평가 삭제 버튼 클릭
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+      });
+
+      expect(aiApi.deleteAnswerFeedback).toHaveBeenCalledWith('sess-1', 1);
+      // 삭제 후 기본 평가하기 버튼으로 복원 및 성공 안내 반영
+      expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+      expect(screen.getByText('답변 평가가 삭제되었습니다.')).toBeInTheDocument();
+
+      // 삭제 완료 후 다시 "이 답변을 평가하기"를 누르면 비어있는 등록 폼이 열리고 평가 삭제 버튼이 없어야 한다
+      await act(async () => {
+        fireEvent.click(screen.getByText('이 답변을 평가하기'));
+      });
+      expect(screen.queryByRole('button', { name: '평가 삭제' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '평가 제출' })).toBeDisabled();
+    });
+
+    it('Given 사용자가 답변 평가 삭제를 요청했으나 서버 에러가 발생한 경우 When 삭제 실패 시 Then 에러 메시지를 표시하고 기존 평가를 유지한다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-err', title: '에러 테스트 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-err',
+        title: '에러 테스트 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-err',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 5,
+          comment: '유지될 의견',
+          createdAt: '2026-08-28T01:00:00Z',
+          updatedAt: '2026-08-28T01:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteAnswerFeedback).mockRejectedValueOnce(new Error('404 Not Found'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('에러 테스트 세션'));
+      });
+
+      // 수정 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('feedback-summary'));
+      });
+
+      // 평가 삭제 버튼 클릭
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+      });
+
+      expect(aiApi.deleteAnswerFeedback).toHaveBeenCalledWith('sess-err', 1);
+      // 삭제 실패 에러 메시지 노출 및 입력값 유지 확인
+      expect(screen.getByTestId('feedback-error')).toHaveTextContent(
+        '평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      );
+      expect(screen.getByRole('button', { name: '평가 삭제' })).toBeEnabled();
+      expect(screen.getByPlaceholderText(/무엇이 아쉬웠는지/i)).toHaveValue('유지될 의견');
+    });
+
+    it('Given 평가가 등록되지 않은 세션 답변의 경우 When 사용자가 평가 등록 폼을 열면 Then 평가 삭제 버튼 없이 취소와 평가 제출 버튼만 노출된다 (SPEC-068)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-unrated', title: '미평가 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-unrated',
+        title: '미평가 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('미평가 세션'));
+      });
+
+      // 평가 등록 폼 열기
+      await act(async () => {
+        fireEvent.click(screen.getByText('이 답변을 평가하기'));
+      });
+
+      // 수용 기준 검증: 평가 삭제 버튼은 없고 취소와 평가 제출 버튼만 표시
+      expect(screen.queryByRole('button', { name: '평가 삭제' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '취소' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '평가 제출' })).toBeInTheDocument();
+    });
+
     it('Given 메타데이터가 없는 레거시 세션 데이터 When 세션을 복원하면 Then 에러 없이 텍스트가 렌더링되고 출처 목록은 빈 상태로 유지된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([
@@ -1922,9 +2094,9 @@ describe('AiService Component', () => {
       expect(screen.getByText('80%')).toBeInTheDocument();
       expect(screen.getByText('95%')).toBeInTheDocument();
 
-      // 마지막 AI 턴의 출처가 표시되고 이전 AI 턴의 출처는 참고 문서 목록에 노출되지 않음
+      // SPEC-042 이후 각 AI 답변 버블이 자기 턴의 출처를 함께 보여준다
       expect(screen.getByText('turn2_doc.pdf')).toBeInTheDocument();
-      expect(screen.queryByText('turn1_doc.pdf')).not.toBeInTheDocument();
+      expect(screen.getByText('turn1_doc.pdf')).toBeInTheDocument();
     });
 
     it('Given 사용자가 질문만 입력하고 백엔드 처리가 중단되거나 출처 검색 결과가 0건인 대화 턴 When 세션을 저장 및 복원하면 Then sources 가 빈 배열 또는 undefined 로 안전하게 처리된다', async () => {
@@ -3818,7 +3990,1107 @@ describe('AiService Component', () => {
         expect(aiApi.getSessions).toHaveBeenLastCalledWith('test-user-1', 1, 50, '매출');
       });
     });
+
+    describe('SPEC-067: 지식베이스 문서 목록 내 원본 파일 다운로드 기능 연동 및 상태 피드백', () => {
+      let createObjectURLMock: ReturnType<typeof vi.fn>;
+      let revokeObjectURLMock: ReturnType<typeof vi.fn>;
+      const capturedAnchor = { download: '', href: '' };
+      let clickSpy: MockInstance;
+
+      beforeEach(() => {
+        capturedAnchor.download = '';
+        capturedAnchor.href = '';
+        createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+        revokeObjectURLMock = vi.fn();
+        vi.stubGlobal('URL', {
+          ...URL,
+          createObjectURL: createObjectURLMock,
+          revokeObjectURL: revokeObjectURLMock,
+        });
+        clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+          capturedAnchor.download = this.download;
+          capturedAnchor.href = this.href;
+        });
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      });
+
+      it('AC 1: Given 색인 완료된 문서가 목록에 있을 때 When [다운로드] 버튼을 클릭하면 Then getDocumentFile이 호출되고 파일 다운로드가 시작된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        const fakeBlob = new Blob(['pdf-content'], { type: 'application/pdf' });
+        vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+        expect(downloadBtn).toBeInTheDocument();
+        expect(downloadBtn).not.toBeDisabled();
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-report');
+        expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
+        expect(clickSpy).toHaveBeenCalled();
+        expect(capturedAnchor.download).toBe('report.pdf');
+        expect(capturedAnchor.href).toBe('blob:mock-url');
+        expect(document.body.querySelector('a[download]')).toBeNull();
+        expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-url');
+      });
+
+      it('AC 2: Given 특정 문서의 다운로드가 진행 중일 때 When 다운로드 완료 전까지 Then 버튼 텍스트가 "다운로드 중..."으로 변경되고 disabled 상태가 된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDownload: (value: Blob) => void;
+        const downloadPromise = new Promise<Blob>((resolve) => {
+          resolveDownload = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(downloadPromise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeDisabled();
+
+        await act(async () => {
+          resolveDownload!(new Blob(['pdf-data']));
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).not.toBeDisabled();
+      });
+
+      it('AC 3: Given 다운로드 API 호출 시 에러가 발생했을 때 When 다운로드 핸들러가 예외를 포착하면 Then 상단 에러 배너에 에러 메시지가 표시되고 다운로드 진행 상태가 해제된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-report',
+            fileName: 'report.pdf',
+            status: 'completed',
+            chunkCount: 5,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Network error'));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByText('문서 다운로드에 실패했습니다.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드' })).not.toBeDisabled();
+      });
+
+      it('AC 4: Given 인제스트 진행 중이거나 실패 상태인 문서의 경우 When 문서 목록이 렌더링될 때 Then 해당 문서 행에는 다운로드 버튼이 노출되지 않는다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-processing',
+            fileName: 'processing.pdf',
+            status: 'processing',
+            chunkCount: 0,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-failed',
+            fileName: 'failed.pdf',
+            status: 'failed',
+            chunkCount: 0,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        expect(screen.queryByRole('button', { name: /다운로드/i })).not.toBeInTheDocument();
+      });
+
+      it('AC 5: Given 여러 완료 문서가 있을 때 한 문서의 다운로드가 진행 중이어도 다른 문서 행의 다운로드 버튼은 영향을 받지 않고 독립적으로 관리된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-1',
+            fileName: 'doc1.pdf',
+            status: 'completed',
+            chunkCount: 2,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-2',
+            fileName: 'doc2.pdf',
+            status: 'completed',
+            chunkCount: 4,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDoc1: (value: Blob) => void;
+        const doc1Promise = new Promise<Blob>((resolve) => {
+          resolveDoc1 = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(doc1Promise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtns = screen.getAllByRole('button', { name: '다운로드' });
+        expect(downloadBtns).toHaveLength(2);
+
+        await act(async () => {
+          fireEvent.click(downloadBtns[0]);
+        });
+
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '다운로드 중...' })).toBeDisabled();
+
+        const remainingDownloadBtn = screen.getByRole('button', { name: '다운로드' });
+        expect(remainingDownloadBtn).toBeInTheDocument();
+        expect(remainingDownloadBtn).not.toBeDisabled();
+
+        await act(async () => {
+          resolveDoc1!(new Blob(['doc-1 data']));
+        });
+
+        expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+      });
+
+      it('Given 다운로드가 진행 중일 때 When 사용자가 다른 완료 문서의 다운로드 버튼을 클릭하면 Then 중복 다운로드 요청이 방지된다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-1',
+            fileName: 'doc1.pdf',
+            status: 'completed',
+            chunkCount: 2,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+          {
+            id: 'doc-2',
+            fileName: 'doc2.pdf',
+            status: 'completed',
+            chunkCount: 4,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+        let resolveDoc1: (value: Blob) => void;
+        const doc1Promise = new Promise<Blob>((resolve) => {
+          resolveDoc1 = resolve;
+        });
+        vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(doc1Promise);
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtns = screen.getAllByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtns[0]);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+        expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-1');
+
+        // doc-1 다운로드가 진행 중인 동안 doc-2의 다운로드 버튼 클릭 시도
+        const remainingDownloadBtn = screen.getByRole('button', { name: '다운로드' });
+        await act(async () => {
+          fireEvent.click(remainingDownloadBtn);
+        });
+
+        // getDocumentFile이 추가로 호출되지 않아야 함
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          resolveDoc1!(new Blob(['doc-1 content']));
+        });
+      });
+
+      it('Given 다운로드 실패 후 에러 배너가 표시되었을 때 When 사용자가 다시 다운로드를 클릭하면 Then 정상적으로 재시도할 수 있다', async () => {
+        const mockDocs = [
+          {
+            id: 'doc-retry',
+            fileName: 'retry.pdf',
+            status: 'completed',
+            chunkCount: 3,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile)
+          .mockRejectedValueOnce(new Error('Temporary 500 error'))
+          .mockResolvedValueOnce(new Blob(['success-content']));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        // 1차 시도: 실패
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(screen.getByText('문서 다운로드에 실패했습니다.')).toBeInTheDocument();
+
+        // 2차 시도: 성공 재시도
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(2);
+        expect(capturedAnchor.download).toBe('retry.pdf');
+        expect(capturedAnchor.href).toBe('blob:mock-url');
+      });
+
+      it('Given 한글 및 특수문자가 포함된 파일명의 문서일 때 When 다운로드를 실행하면 Then 원본 파일명이 온전하게 다운로드 속성에 지정된다', async () => {
+        const specialFileName = '2026년도_AI사업 [최종 보고서] (v1.2).pdf';
+        const mockDocs = [
+          {
+            id: 'doc-special',
+            fileName: specialFileName,
+            status: 'completed',
+            chunkCount: 10,
+            createdAt: '2026-10-14T00:00:00Z',
+          },
+        ];
+        vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+        vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(new Blob(['pdf-data']));
+
+        await act(async () => {
+          render(<AiService />);
+        });
+
+        const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+
+        await act(async () => {
+          fireEvent.click(downloadBtn);
+        });
+
+        expect(capturedAnchor.download).toBe(specialFileName);
+      });
+    });
+
+    describe('답변 평가 피드백 토스트 알림', () => {
+      it('답변 평가를 신규 제출하면 "답변 평가가 저장되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-1',
+          title: '피드백 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '피드백 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '피드백 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: '좋습니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        // 세션 로드 (handleLoadSession 호출을 시뮬레이션하거나 getSessions mock 후 아이템 클릭)
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-1', title: '피드백 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '피드백' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('피드백 테스트 세션'));
+        });
+
+        // "이 답변을 평가하기" 버튼 클릭
+        const evalBtn = screen.getByRole('button', { name: /이 답변을 평가하기/i });
+        await act(async () => {
+          fireEvent.click(evalBtn);
+        });
+
+        // 정확도 5점, 유용성 4점 선택
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 4점/));
+        });
+
+        // 제출
+        const submitBtn = screen.getByRole('button', { name: /평가 제출/i });
+        await act(async () => {
+          fireEvent.click(submitBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+          sessionId: 'sess-fb-1',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 4,
+          comment: undefined,
+        });
+
+        // 토스트 알림 검증
+        expect(screen.getByText('답변 평가가 저장되었습니다.')).toBeInTheDocument();
+      });
+
+      it('기존 평가를 수정하여 제출하면 "답변 평가가 수정되었습니다." 토스트 알림이 표시된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        const mockDetail = {
+          sessionId: 'sess-fb-2',
+          title: '수정 테스트 세션',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T00:00:00Z',
+          turns: [
+            { role: 'user' as const, content: '수정 질문', createdAt: '2026-10-11T00:00:00Z' },
+            { role: 'assistant' as const, content: '수정 답변', createdAt: '2026-10-11T00:00:00Z' },
+          ],
+        };
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockDetail);
+        vi.mocked(aiApi.getSessionFeedback).mockResolvedValueOnce([
+          {
+            sessionId: 'sess-fb-2',
+            turnIndex: 1,
+            accuracy: 3,
+            helpfulness: 3,
+            comment: '보통입니다',
+            createdAt: '2026-10-11T00:00:00Z',
+            updatedAt: '2026-10-11T00:00:00Z',
+          },
+        ]);
+        vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+          sessionId: 'sess-fb-2',
+          turnIndex: 1,
+          accuracy: 5,
+          helpfulness: 5,
+          comment: '보통입니다',
+          createdAt: '2026-10-11T00:00:00Z',
+          updatedAt: '2026-10-11T01:00:00Z',
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+          { sessionId: 'sess-fb-2', title: '수정 테스트 세션', isBookmarked: false, updatedAt: '2026-10-11T00:00:00Z' },
+        ]);
+        const searchInput = screen.getByPlaceholderText('대화 검색...');
+        await act(async () => {
+          fireEvent.change(searchInput, { target: { value: '수정' } });
+          fireEvent.click(screen.getByRole('button', { name: /검색 실행/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('수정 테스트 세션'));
+        });
+
+        // 수정 버튼 클릭
+        const summaryBtn = screen.getByRole('button', { name: /내 평가/i });
+        await act(async () => {
+          fireEvent.click(summaryBtn);
+        });
+
+        // 정확도 5점 변경 후 수정 제출
+        await act(async () => {
+          fireEvent.click(screen.getByLabelText(/^정확도 5점/));
+          fireEvent.click(screen.getByLabelText(/^유용성 5점/));
+        });
+
+        const updateBtn = screen.getByRole('button', { name: /평가 수정/i });
+        await act(async () => {
+          fireEvent.click(updateBtn);
+        });
+
+        expect(aiApi.submitAnswerFeedback).toHaveBeenCalled();
+        expect(screen.getByText('답변 평가가 수정되었습니다.')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Turn-level source citations (SPEC-042)', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('AC 1: Given 1번째 질문에 참고 문서 A가 표시된 후 2번째 질문에 참고 문서 B를 수신할 때 Then 1번째 답변에는 A가 유지되고 2번째 답변에는 B가 독립적으로 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      const mockSourcesTurn1: aiApi.SourceRef[] = [
+        { fileName: 'turn1_source.pdf', chunkIndex: 0, documentId: 'doc-t1', snippet: '1번째 출처 스니펫' },
+      ];
+      const mockSourcesTurn2: aiApi.SourceRef[] = [
+        { fileName: 'turn2_source.pdf', chunkIndex: 0, documentId: 'doc-t2', snippet: '2번째 출처 스니펫' },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream)
+        .mockImplementationOnce((_q, onMessage, onDone, _err, _uid, _chat, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSourcesTurn1);
+            onMessage('첫 번째 답변입니다.');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        })
+        .mockImplementationOnce((_q, onMessage, onDone, _err, _uid, _chat, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSourcesTurn2);
+            onMessage('두 번째 답변입니다.');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 1번째 질문 전송
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '1번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(screen.getByText('turn1_source.pdf')).toBeInTheDocument();
+
+      // 2번째 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '2번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 1번째 답변의 출처와 2번째 답변의 출처가 둘 다 독립적으로 존재해야 함
+      expect(screen.getByText('turn1_source.pdf')).toBeInTheDocument();
+      expect(screen.getByText('turn2_source.pdf')).toBeInTheDocument();
+    });
+
+    it('AC 2: Given 여러 턴의 질문-답변 및 출처가 저장된 대화 세션 복원 시 Then 모든 AI 메시지 버블에 각 턴의 참고 문서가 올바르게 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'multi-turn-sess', title: '다중 턴 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'multi-turn-sess',
+        title: '다중 턴 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문 1',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 1',
+            createdAt: '2026-09-20T00:00:01Z',
+            sources: [
+              { fileName: 'restored_turn1.pdf', chunkIndex: 0, documentId: 'r-t1', snippet: '복원된 출처 1' },
+            ],
+          },
+          {
+            role: 'user',
+            content: '질문 2',
+            createdAt: '2026-09-20T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 2',
+            createdAt: '2026-09-20T00:00:03Z',
+            sources: [
+              { fileName: 'restored_turn2.pdf', chunkIndex: 0, documentId: 'r-t2', snippet: '복원된 출처 2' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('다중 턴 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 두 턴의 출처가 모두 복원되어 화면에 표시되어야 함
+      expect(screen.getByText('restored_turn1.pdf')).toBeInTheDocument();
+      expect(screen.getByText('restored_turn2.pdf')).toBeInTheDocument();
+    });
+
+    it('AC 3: Given 출처 정보가 없거나 빈 배열인 AI 메시지 버블인 경우 When 렌더링될 때 Then 에러 없이 참고 문서 영역이 생략된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'no-source-sess', title: '출처 없는 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'no-source-sess',
+        title: '출처 없는 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '단발 질문',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '단발 답변',
+            createdAt: '2026-09-20T00:00:01Z',
+            confidence: 0.8,
+            sources: [],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('출처 없는 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getAllByText('단발 답변').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText('참고 문서')).not.toBeInTheDocument();
+    });
+
+    it('AC 4: Given 특정 AI 메시지 버블의 참고 문서를 펼칠 때 When 청크 목록이 펼쳐져도 Then 다른 메시지 버블의 참고 문서 펼침 상태에 영향을 주지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'isolated-toggle-sess', title: '독립 토글 세션', updatedAt: '2026-09-20T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'isolated-toggle-sess',
+        title: '독립 토글 세션',
+        createdAt: '2026-09-20T00:00:00Z',
+        updatedAt: '2026-09-20T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문 1',
+            createdAt: '2026-09-20T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 1',
+            createdAt: '2026-09-20T00:00:01Z',
+            sources: [
+              { fileName: 'same_name.pdf', chunkIndex: 0, documentId: 'same-doc-id', snippet: '1번째 답변 청크 스니펫' },
+            ],
+          },
+          {
+            role: 'user',
+            content: '질문 2',
+            createdAt: '2026-09-20T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 2',
+            createdAt: '2026-09-20T00:00:03Z',
+            sources: [
+              { fileName: 'same_name.pdf', chunkIndex: 0, documentId: 'same-doc-id', snippet: '2번째 답변 청크 스니펫' },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = screen.getByText('독립 토글 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const toggleButtons = screen.getAllByRole('button', { name: /same_name\.pdf/i });
+      expect(toggleButtons).toHaveLength(2);
+
+      // 처음에는 둘 다 스니펫이 닫혀 있음
+      expect(screen.queryByText('1번째 답변 청크 스니펫')).not.toBeInTheDocument();
+      expect(screen.queryByText('2번째 답변 청크 스니펫')).not.toBeInTheDocument();
+
+      // 1번째 메시지의 문서만 펼침
+      await act(async () => {
+        fireEvent.click(toggleButtons[0]);
+      });
+
+      expect(screen.getByText('1번째 답변 청크 스니펫')).toBeInTheDocument();
+      expect(screen.queryByText('2번째 답변 청크 스니펫')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Session Delete Confirmation Modal (SPEC-058)', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-1', nickName: 'Tester' },
+      token: 'mock-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    const mockSessions = [
+      {
+        sessionId: 'sess-1',
+        title: '환불 규정 문의',
+        isBookmarked: false,
+        updatedAt: '2026-09-12T00:00:00Z',
+      },
+      {
+        sessionId: 'sess-2',
+        title: '',
+        isBookmarked: false,
+        updatedAt: '2026-09-11T00:00:00Z',
+      },
+    ];
+
+    beforeEach(() => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue(mockSessions);
+      vi.mocked(aiApi.deleteSessionById).mockResolvedValue(undefined);
+    });
+
+    it('Given 사용자가 대화 세션 목록을 조회한 상태에서 When 특정 세션의 삭제(✕) 버튼을 클릭하면 Then deleteSessionById API가 즉시 호출되지 않고 세션 삭제 확인 모달이 표시되며 세션 제목과 경고 문구가 노출된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      // API가 즉시 호출되지 않아야 함
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+
+      // 세션 삭제 확인 모달 표시 및 제목/경고 노출
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText('"환불 규정 문의" 대화를 삭제하시겠습니까?')).toBeInTheDocument();
+      expect(screen.getByText(/삭제된 대화는 복구할 수 없으며/i)).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 취소 버튼을 누르면 Then 삭제 API가 호출되지 않고 모달이 닫히며 기존 세션 목록이 그대로 유지된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '취소' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('환불 규정 문의')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 모달 바깥 배경을 클릭하면 Then 삭제 API가 호출되지 않고 모달이 닫힌다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const overlay = screen.getByTestId('session-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 Escape 키를 누르면 Then 삭제 API가 호출되지 않고 모달이 닫힌다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+
+      expect(aiApi.deleteSessionById).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 확인 모달이 열려 있는 상태에서 When 사용자가 삭제 버튼을 클릭하면 Then 버튼이 "삭제 중..."으로 바뀌고 비활성화되며 deleteSessionById가 호출되어 성공 시 모달이 닫히고 목록에서 해당 세션이 제거된다', async () => {
+      let resolveDelete: () => void = () => {};
+      vi.mocked(aiApi.deleteSessionById).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDelete = resolve;
+          }),
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      const cancelBtn = modal.querySelector('.btn-cancel-delete') as HTMLButtonElement;
+
+      // 삭제 확인 버튼 클릭
+      act(() => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(aiApi.deleteSessionById).toHaveBeenCalledWith('sess-1');
+      expect(confirmDeleteBtn).toHaveTextContent('삭제 중...');
+      expect(confirmDeleteBtn).toBeDisabled();
+      expect(cancelBtn).toBeDisabled();
+
+      // 비동기 완료
+      await act(async () => {
+        resolveDelete();
+      });
+
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.queryByText('환불 규정 문의')).not.toBeInTheDocument();
+    });
+
+    it('Given 현재 열려 있는 활성 세션에 대해 삭제가 완료되었을 때 When 삭제가 성공하면 Then 대화창이 새 질문 상태로 초기화된다', async () => {
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-1',
+        title: '환불 규정 문의',
+        createdAt: '2026-09-12T00:00:00Z',
+        updatedAt: '2026-09-12T00:00:00Z',
+        turns: [
+          { role: 'user', content: '환불 어떻게 받나요?', createdAt: '2026-09-12T00:00:00Z' },
+          { role: 'assistant', content: '고객센터로 문의하세요.', createdAt: '2026-09-12T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // sess-1 선택하여 대화창에 로드
+      await act(async () => {
+        fireEvent.click(screen.getByText('환불 규정 문의'));
+      });
+
+      expect(screen.getByText('환불 어떻게 받나요?')).toBeInTheDocument();
+
+      // 삭제 버튼 클릭 및 확인
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      // 대화창이 초기화되어 기존 대화 내용이 사라졌는지 확인
+      expect(screen.queryByText('환불 어떻게 받나요?')).not.toBeInTheDocument();
+    });
+
+    it('Given 세션 제목이 빈 문자열("")이거나 없는 세션에 대해 When 삭제 버튼을 클릭하면 Then 확인 모달에 "선택한 대화를 삭제하시겠습니까?"라는 기본 문구가 오류 없이 안전하게 노출된다', async () => {
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // sess-2는 title이 ''
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[1]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText('선택한 대화를 삭제하시겠습니까?')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 API 호출 실패 시 When 삭제를 시도하면 Then 확인 모달이 닫히고 상단 에러 배너에 "세션 삭제에 실패했습니다." 에러 메시지가 노출된다', async () => {
+      vi.mocked(aiApi.deleteSessionById).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+      expect(screen.getByText('세션 삭제에 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 세션 삭제 진행 중(isDeletingSession: true)인 상태에서 When 사용자가 Escape 키를 누르거나 배경을 클릭하면 Then 모달이 닫히지 않고 삭제 진행이 유지된다', async () => {
+      let resolveDelete: () => void = () => {};
+      vi.mocked(aiApi.deleteSessionById).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDelete = resolve;
+          }),
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const deleteBtns = screen.getAllByTitle('삭제');
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const modal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      const confirmDeleteBtn = modal.querySelector('.btn-confirm-delete') as HTMLButtonElement;
+      act(() => {
+        fireEvent.click(confirmDeleteBtn);
+      });
+
+      // Escape 키 입력 시도
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      // 배경 클릭 시도
+      const overlay = screen.getByTestId('session-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.getByRole('dialog', { name: /대화 삭제 확인/i })).toBeInTheDocument();
+
+      // 완료 후 모달 닫힘
+      await act(async () => {
+        resolveDelete();
+      });
+      expect(screen.queryByRole('dialog', { name: /대화 삭제 확인/i })).not.toBeInTheDocument();
+    });
   });
 });
+
 
 
