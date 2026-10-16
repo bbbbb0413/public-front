@@ -340,6 +340,27 @@
   border-color: hsl(210, 90%, 70%);
 }
 
+.btn-download {
+  background: hsla(210, 80%, 50%, 0.15);
+  border: 1px solid hsla(210, 80%, 60%, 0.3);
+  color: hsl(210, 90%, 75%);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.btn-download:hover:not(:disabled) {
+  background: hsla(210, 80%, 50%, 0.25);
+  border-color: hsl(210, 90%, 70%);
+}
+
+.btn-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-delete {
   background: transparent;
   border: 1px solid hsla(350, 85%, 50%, 0.3);
