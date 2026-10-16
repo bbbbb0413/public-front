@@ -79,6 +79,31 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [prevExisting, setPrevExisting] = useState(existing);
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
+    setAccuracy(existing?.accuracy ?? null);
+    setHelpfulness(existing?.helpfulness ?? null);
+    setComment(existing?.comment ?? '');
+  }
+
+  const resetForm = () => {
+    setAccuracy(existing?.accuracy ?? null);
+    setHelpfulness(existing?.helpfulness ?? null);
+    setComment(existing?.comment ?? '');
+    setError(null);
+  };
+
+  const handleOpen = () => {
+    resetForm();
+    setIsOpen(true);
+  };
+
+  const handleCancel = () => {
+    resetForm();
+    setIsOpen(false);
+  };
+
   const canSubmit = accuracy !== null && helpfulness !== null && !saving;
 
   const handleSubmit = async () => {
@@ -108,7 +133,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           <button
             type="button"
             className="btn-feedback-toggle rated"
-            onClick={() => setIsOpen(true)}
+            onClick={handleOpen}
           >
             <span className="feedback-summary" data-testid="feedback-summary">
               내 평가 · 정확도 {existing.accuracy}/5 · 유용성 {existing.helpfulness}/5
@@ -119,7 +144,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
           <button
             type="button"
             className="btn-feedback-toggle"
-            onClick={() => setIsOpen(true)}
+            onClick={handleOpen}
           >
             이 답변을 평가하기
           </button>
@@ -167,7 +192,7 @@ export const AnswerFeedback = ({ existing, onSubmit }: Props) => {
         <button
           type="button"
           className="btn-feedback-cancel"
-          onClick={() => setIsOpen(false)}
+          onClick={handleCancel}
           disabled={saving}
         >
           취소
