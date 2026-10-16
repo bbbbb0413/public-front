@@ -1126,6 +1126,31 @@
   line-height: 1.4;
 }
 
+/* ── 근거 부재 경고 배너 (SPEC-059) ── */
+.ungrounded-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #fbbf24;
+}
+
+.ungrounded-warning-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.ungrounded-warning-text {
+  line-height: 1.35;
+}
+
 /* ── 세션 사이드바 ── */
 .chat-modal {
   display: flex;

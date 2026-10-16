@@ -610,7 +610,7 @@ export const AiService = () => {
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;
-    let streamingSources: SourceRef[] = [];
+    let receivedSources: SourceRef[] = [];
 
     const handle = askQuestionStream(
       currentQuestion,
@@ -623,8 +623,16 @@ export const AiService = () => {
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
-        const sources = streamingSources.length > 0 ? streamingSources : undefined;
-        setChatLog((prev) => [...prev, { sender: 'ai', text: accumulated, confidence, missing, sources }]);
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated,
+            confidence,
+            missing,
+            sources: receivedSources,
+          },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentSources([]);
@@ -644,7 +652,7 @@ export const AiService = () => {
       userId,
       prevChatLog,
       (sources) => {
-        streamingSources = sources;
+        receivedSources = sources;
         setCurrentSources(sources);
       },
       sessionId,
@@ -1062,6 +1070,23 @@ export const AiService = () => {
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
                         <>
+                          {(() => {
+                            const isNoSources = !msg.sources || msg.sources.length === 0;
+                            const isUngrounded =
+                              isNoSources &&
+                              (msg.confidence === 0 || (msg.missing && msg.missing.length > 0));
+                            if (!isUngrounded) return null;
+                            return (
+                              <div className="ungrounded-warning" data-testid="ungrounded-warning">
+                                <span className="ungrounded-warning-icon" aria-hidden="true">
+                                  ⚠
+                                </span>
+                                <span className="ungrounded-warning-text">
+                                  근거 문서 미발견 (모델 일반 지식 기반 답변)
+                                </span>
+                              </div>
+                            );
+                          })()}
                           <ReactMarkdown
                             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                             rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
