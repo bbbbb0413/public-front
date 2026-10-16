@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { PaymentHistory } from './PaymentHistory';
@@ -23,7 +23,7 @@ describe('PaymentHistory Component', () => {
     vi.clearAllMocks();
   });
 
-  it('fetches and renders the payment list without requiring the user to type an id', async () => {
+  it('fetches and renders the payment list with createdAt and default pagination info', async () => {
     vi.mocked(axios.get).mockResolvedValueOnce({
       data: {
         data: {
@@ -35,6 +35,7 @@ describe('PaymentHistory Component', () => {
               currency: 'KRW',
               productId: 'gold_500',
               status: 'COMPLETED',
+              createdAt: '2026-09-12T14:30:00.000Z',
             },
             {
               paymentId: 102,
@@ -43,6 +44,7 @@ describe('PaymentHistory Component', () => {
               currency: 'KRW',
               productId: 'gold_100',
               status: 'FAILED',
+              createdAt: '',
             },
           ],
           page: 1,
@@ -65,6 +67,152 @@ describe('PaymentHistory Component', () => {
     expect(screen.getByText('gold_100')).toBeInTheDocument();
     expect(screen.getByText('COMPLETED')).toHaveClass('status-success');
     expect(screen.getByText('FAILED')).toHaveClass('status-failed');
+
+    // 결제 일시 렌더링 및 빈 값 폴백 확인
+    expect(screen.getAllByText('결제 일시')).toHaveLength(2);
+    expect(screen.getByText('2026-09-12 14:30:00')).toBeInTheDocument();
+    expect(screen.getByText('-')).toBeInTheDocument();
+
+    // 페이지네이션 컨트롤 확인 (1 / 1, 둘 다 비활성화)
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    const prevBtn = screen.getByRole('button', { name: '이전' });
+    const nextBtn = screen.getByRole('button', { name: '다음' });
+    expect(prevBtn).toBeDisabled();
+    expect(nextBtn).toBeDisabled();
+  });
+
+  it('handles multi-page pagination navigation correctly', async () => {
+    // 1페이지 응답 (총 25건 중 20건, 총 2페이지)
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: Array.from({ length: 20 }, (_, i) => ({
+            paymentId: i + 1,
+            accountId: 42,
+            amount: 1000,
+            currency: 'KRW',
+            productId: `gold_${i + 1}`,
+            status: 'COMPLETED',
+            createdAt: '2026-09-12T14:30:00.000Z',
+          })),
+          page: 1,
+          take: 20,
+          itemCount: 25,
+          pageCount: 2,
+          hasPreviousPage: false,
+          hasNextPage: true,
+        },
+      },
+    });
+
+    render(<PaymentHistory />);
+
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '이전' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음' })).not.toBeDisabled();
+
+    // 2페이지 응답 모킹 및 다음 버튼 클릭
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: Array.from({ length: 5 }, (_, i) => ({
+            paymentId: 21 + i,
+            accountId: 42,
+            amount: 1000,
+            currency: 'KRW',
+            productId: `gold_${21 + i}`,
+            status: 'COMPLETED',
+            createdAt: '2026-09-12T15:00:00.000Z',
+          })),
+          page: 2,
+          take: 20,
+          itemCount: 25,
+          pageCount: 2,
+          hasPreviousPage: true,
+          hasNextPage: false,
+        },
+      },
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: '다음' }).click();
+    });
+
+    await waitFor(() => {
+      expect(axios.get).toHaveBeenCalledWith('/payments', { params: { page: 2, take: 20 } });
+    });
+
+    await waitFor(() => expect(screen.getByText('2 / 2')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '이전' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+    expect(screen.getByText('gold_21')).toBeInTheDocument();
+
+    // 2페이지에서 이전 버튼 클릭 시 1페이지로 다시 이동
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: Array.from({ length: 20 }, (_, i) => ({
+            paymentId: i + 1,
+            accountId: 42,
+            amount: 1000,
+            currency: 'KRW',
+            productId: `gold_${i + 1}`,
+            status: 'COMPLETED',
+            createdAt: '2026-09-12T14:30:00.000Z',
+          })),
+          page: 1,
+          take: 20,
+          itemCount: 25,
+          pageCount: 2,
+          hasPreviousPage: false,
+          hasNextPage: true,
+        },
+      },
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: '이전' }).click();
+    });
+
+    await waitFor(() => {
+      expect(axios.get).toHaveBeenCalledWith('/payments', { params: { page: 1, take: 20 } });
+    });
+
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '이전' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음' })).not.toBeDisabled();
+  });
+
+  it('safely handles invalid date format and renders fallback dash', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: {
+        data: {
+          payments: [
+            {
+              paymentId: 103,
+              accountId: 42,
+              amount: 3000,
+              currency: 'KRW',
+              productId: 'gold_300',
+              status: 'COMPLETED',
+              createdAt: 'invalid-date-format',
+            },
+          ],
+          page: 1,
+          take: 20,
+          itemCount: 1,
+          pageCount: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+        },
+      },
+    });
+
+    render(<PaymentHistory />);
+
+    await waitFor(() => expect(screen.getByText('103')).toBeInTheDocument());
+    expect(screen.getByText('결제 일시')).toBeInTheDocument();
+    expect(screen.getByText('-')).toBeInTheDocument();
   });
 
   it('shows an empty state when there are no payments', async () => {
@@ -99,3 +247,4 @@ describe('PaymentHistory Component', () => {
     );
   });
 });
+
