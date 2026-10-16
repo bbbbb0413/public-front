@@ -1922,9 +1922,9 @@ describe('AiService Component', () => {
       expect(screen.getByText('80%')).toBeInTheDocument();
       expect(screen.getByText('95%')).toBeInTheDocument();
 
-      // 마지막 AI 턴의 출처가 표시되고 이전 AI 턴의 출처는 참고 문서 목록에 노출되지 않음
+      // SPEC-042 이후 각 AI 답변 버블이 자기 턴의 출처를 함께 보여준다
       expect(screen.getByText('turn2_doc.pdf')).toBeInTheDocument();
-      expect(screen.queryByText('turn1_doc.pdf')).not.toBeInTheDocument();
+      expect(screen.getByText('turn1_doc.pdf')).toBeInTheDocument();
     });
 
     it('Given 사용자가 질문만 입력하고 백엔드 처리가 중단되거나 출처 검색 결과가 0건인 대화 턴 When 세션을 저장 및 복원하면 Then sources 가 빈 배열 또는 undefined 로 안전하게 처리된다', async () => {
