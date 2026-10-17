@@ -355,7 +355,8 @@
   font-weight: 600;
 }
 
-.status-badge.processed {
+.status-badge.processed,
+.status-badge.completed {
   background: hsla(150, 80%, 30%, 0.2);
   color: hsl(150, 80%, 60%);
   border: 1px solid hsla(150, 80%, 40%, 0.3);

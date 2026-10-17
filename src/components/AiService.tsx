@@ -679,7 +679,7 @@ export const AiService = () => {
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
 
-  const completedDocsCount = documents.filter((d) => d.status === 'processed').length;
+  const completedDocsCount = documents.filter((d) => d.status === 'processed' || d.status === 'completed').length;
   const processingDocsCount = documents.filter((d) => d.status === 'processing' || d.status === 'pending' || d.status === 'queued').length;
   const failedDocsCount = documents.filter((d) => d.status === 'failed' || d.status === 'error').length;
   const activeSessionsCount = sessions.length;
@@ -831,6 +831,7 @@ export const AiService = () => {
                   </thead>
                   <tbody>
                     {filteredDocs.map((doc) => {
+                      const isCompleted = doc.status === 'processed' || doc.status === 'completed';
                       const isProcessing = doc.status === 'processing' || doc.status === 'pending' || doc.status === 'queued';
                       const isFailed = doc.status === 'failed' || doc.status === 'error';
                       const stepLabel = doc.step ? (STEP_LABELS[doc.step] || doc.step) : null;
@@ -856,7 +857,7 @@ export const AiService = () => {
                               {isFailed && (
                                 <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
                               )}
-                              {doc.status === 'completed' && (
+                              {isCompleted && (
                                 <button
                                   type="button"
                                   onClick={() => handleDownloadDocument(doc)}

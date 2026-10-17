@@ -5457,7 +5457,188 @@ describe('AiService Component', () => {
       expect(screen.getByTestId('confidence-badge')).toHaveTextContent('90%');
     });
   });
+
+  describe('SPEC-077: 지식베이스 완료 문서 상태값(processed) 불일치 수정 및 다운로드 버튼 노출 정상화', () => {
+    let createObjectURLMock: ReturnType<typeof vi.fn>;
+    let revokeObjectURLMock: ReturnType<typeof vi.fn>;
+    const capturedAnchor = { download: '', href: '' };
+    let clickSpy: MockInstance;
+
+    beforeEach(() => {
+      capturedAnchor.download = '';
+      capturedAnchor.href = '';
+      createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+      revokeObjectURLMock = vi.fn();
+      vi.stubGlobal('URL', {
+        ...URL,
+        createObjectURL: createObjectURLMock,
+        revokeObjectURL: revokeObjectURLMock,
+      });
+      clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+        capturedAnchor.download = this.download;
+        capturedAnchor.href = this.href;
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    it('AC 1: Given 백엔드 문서 목록 API가 status: "processed" 문서(id: "doc-1", fileName: "guide.pdf")를 반환했을 때 When 문서 목록 테이블이 렌더링되면 Then 활성화된 [다운로드] 버튼이 표시되고 클릭 시 getDocumentFile("doc-1")이 호출되어 guide.pdf 다운로드가 실행된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-1',
+          fileName: 'guide.pdf',
+          status: 'processed',
+          chunkCount: 8,
+          createdAt: '2026-10-18T00:00:00Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      const fakeBlob = new Blob(['guide-content'], { type: 'application/pdf' });
+      vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+      expect(downloadBtn).toBeInTheDocument();
+      expect(downloadBtn).toHaveClass('btn-download');
+      expect(downloadBtn).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(downloadBtn);
+      });
+
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-1');
+      expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
+      expect(clickSpy).toHaveBeenCalled();
+      expect(capturedAnchor.download).toBe('guide.pdf');
+      expect(capturedAnchor.href).toBe('blob:mock-url');
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-url');
+    });
+
+    it('AC 2: Given 문서 목록에 status: "processed" 문서 2건이 표시되어 있을 때 When 첫 번째 문서의 [다운로드] 버튼을 클릭하여 요청이 진행 중이면 Then 첫 번째 문서 버튼만 "다운로드 중..." 텍스트와 함께 disabled 상태가 되고 두 번째 문서의 [다운로드] 버튼은 활성 상태로 유지된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-1',
+          fileName: 'guide1.pdf',
+          status: 'processed',
+          chunkCount: 3,
+          createdAt: '2026-10-18T00:00:00Z',
+        },
+        {
+          id: 'doc-2',
+          fileName: 'guide2.pdf',
+          status: 'processed',
+          chunkCount: 6,
+          createdAt: '2026-10-18T00:00:00Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveDoc1: (value: Blob) => void;
+      const doc1Promise = new Promise<Blob>((resolve) => {
+        resolveDoc1 = resolve;
+      });
+      vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(doc1Promise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const downloadBtns = screen.getAllByRole('button', { name: '다운로드' });
+      expect(downloadBtns).toHaveLength(2);
+
+      await act(async () => {
+        fireEvent.click(downloadBtns[0]);
+      });
+
+      const downloadingBtn = screen.getByRole('button', { name: '다운로드 중...' });
+      expect(downloadingBtn).toBeInTheDocument();
+      expect(downloadingBtn).toBeDisabled();
+
+      const activeBtn = screen.getByRole('button', { name: '다운로드' });
+      expect(activeBtn).toBeInTheDocument();
+      expect(activeBtn).not.toBeDisabled();
+
+      // 첫 번째 processed 문서 다운로드 진행 중 두 번째 processed 문서 다운로드 클릭 시 중복 요청 방지 검증
+      await act(async () => {
+        fireEvent.click(activeBtn);
+      });
+      expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-1');
+
+      await act(async () => {
+        resolveDoc1!(new Blob(['doc-1 content']));
+      });
+
+      expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+    });
+
+    it('Given status: "processed" 문서의 다운로드 요청이 실패했을 때 When 다운로드 핸들러가 예외를 처리하면 Then 에러 배너가 노출되고 버튼 상태가 복구된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-processed-err',
+          fileName: 'guide-error.pdf',
+          status: 'processed',
+          chunkCount: 4,
+          createdAt: '2026-10-18T00:00:00Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Download error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const downloadBtn = screen.getByRole('button', { name: '다운로드' });
+      await act(async () => {
+        fireEvent.click(downloadBtn);
+      });
+
+      expect(screen.getByText('문서 다운로드에 실패했습니다.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '다운로드' })).not.toBeDisabled();
+    });
+
+    it('AC 3: Given 문서의 status가 "pending", "processing", "queued", "failed", "error" 또는 빈 문자열("")인 경우 When 문서 목록 테이블이 렌더링되면 Then 해당 문서 행에는 [다운로드] 버튼이 렌더링되지 않는다', async () => {
+      const mockDocs = [
+        { id: 'doc-pending', fileName: 'pending.pdf', status: 'pending', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-processing', fileName: 'processing.pdf', status: 'processing', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-queued', fileName: 'queued.pdf', status: 'queued', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-failed', fileName: 'failed.pdf', status: 'failed', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-error', fileName: 'error.pdf', status: 'error', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-empty', fileName: 'empty.pdf', status: '', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.queryByRole('button', { name: /다운로드/i })).not.toBeInTheDocument();
+    });
+
+    it('Given status가 "processed"인 문서와 "completed"인 문서가 함께 있을 때 When 화면이 렌더링되면 Then 두 문서 모두 [다운로드] 버튼과 완료 상태 배지가 노출되고 대시보드 완료된 문서 수(completedDocsCount)에 함께 집계된다', async () => {
+      const mockDocs = [
+        { id: 'doc-processed', fileName: 'processed.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-completed', fileName: 'completed.pdf', status: 'completed', chunkCount: 3, createdAt: '2026-10-18T00:00:00Z' },
+        { id: 'doc-pending', fileName: 'pending.pdf', status: 'pending', chunkCount: 0, createdAt: '2026-10-18T00:00:00Z' },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+      expect(screen.getByText('processed')).toHaveClass('status-badge', 'processed');
+      expect(screen.getByText('completed')).toHaveClass('status-badge', 'completed');
+      const metricDocs = screen.getByTestId('metric-docs');
+      expect(metricDocs).toHaveTextContent('2');
+    });
+  });
 });
-
-
-
