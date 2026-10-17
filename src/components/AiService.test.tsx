@@ -5564,6 +5564,13 @@ describe('AiService Component', () => {
       expect(activeBtn).toBeInTheDocument();
       expect(activeBtn).not.toBeDisabled();
 
+      // 첫 번째 processed 문서 다운로드 진행 중 두 번째 processed 문서 다운로드 클릭 시 중복 요청 방지 검증
+      await act(async () => {
+        fireEvent.click(activeBtn);
+      });
+      expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-1');
+
       await act(async () => {
         resolveDoc1!(new Blob(['doc-1 content']));
       });
@@ -5615,7 +5622,7 @@ describe('AiService Component', () => {
       expect(screen.queryByRole('button', { name: /다운로드/i })).not.toBeInTheDocument();
     });
 
-    it('Given status가 "processed"인 문서와 "completed"인 문서가 함께 있을 때 When 화면이 렌더링되면 Then 두 문서 모두 [다운로드] 버튼이 노출되고 대시보드 완료된 문서 수(completedDocsCount)에 함께 집계된다', async () => {
+    it('Given status가 "processed"인 문서와 "completed"인 문서가 함께 있을 때 When 화면이 렌더링되면 Then 두 문서 모두 [다운로드] 버튼과 완료 상태 배지가 노출되고 대시보드 완료된 문서 수(completedDocsCount)에 함께 집계된다', async () => {
       const mockDocs = [
         { id: 'doc-processed', fileName: 'processed.pdf', status: 'processed', chunkCount: 5, createdAt: '2026-10-18T00:00:00Z' },
         { id: 'doc-completed', fileName: 'completed.pdf', status: 'completed', chunkCount: 3, createdAt: '2026-10-18T00:00:00Z' },
@@ -5628,6 +5635,8 @@ describe('AiService Component', () => {
       });
 
       expect(screen.getAllByRole('button', { name: '다운로드' })).toHaveLength(2);
+      expect(screen.getByText('processed')).toHaveClass('status-badge', 'processed');
+      expect(screen.getByText('completed')).toHaveClass('status-badge', 'completed');
       const metricDocs = screen.getByTestId('metric-docs');
       expect(metricDocs).toHaveTextContent('2');
     });
