@@ -50,6 +50,8 @@ interface ChatMessage {
   missing?: string[];
   iterations?: number;
   sources?: SourceRef[];
+  isError?: boolean;
+  errorMessage?: string;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -137,6 +139,7 @@ export const AiService = () => {
   const activeSubscriptionsRef = useRef<Set<() => void>>(new Set());
   const activeStreamCancelRef = useRef<(() => Promise<void>) | null>(null);
   const streamingAnswerRef = useRef<string>('');
+  const lastFailedQuestionRef = useRef<string>('');
 
   const fetchSessions = async (searchQuery?: string) => {
     if (!userId) return;
@@ -602,14 +605,7 @@ export const AiService = () => {
     setIsStreaming(false);
   };
 
-  const handleSendQuestion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!question.trim() || isStreaming) return;
-
-    const currentQuestion = question.trim();
-    const prevChatLog = sessionId ? [] : chatLog;
-    setQuestion('');
-    setChatLog((prev) => [...prev, { sender: 'user', text: currentQuestion }]);
+  const startQuestionStreaming = (currentQuestion: string, prevChatLog: ChatMessage[]) => {
     setIsStreaming(true);
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
@@ -651,9 +647,25 @@ export const AiService = () => {
         setIsStreaming(false);
         if (userId) fetchSessions();
       },
-      () => {
+      (error?: unknown) => {
         activeStreamCancelRef.current = null;
+        const errorDetails =
+          error instanceof Error
+            ? error.message
+            : typeof error === 'string'
+              ? error
+              : '답변 수신 도중 에러가 발생했습니다.';
         setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
+        lastFailedQuestionRef.current = currentQuestion;
+        setChatLog((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            text: accumulated || '답변을 생성하지 못했습니다.',
+            isError: true,
+            errorMessage: errorDetails,
+          },
+        ]);
         setStreamingAnswer('');
         streamingAnswerRef.current = '';
         setCurrentSources([]);
@@ -675,6 +687,43 @@ export const AiService = () => {
     );
 
     activeStreamCancelRef.current = handle?.cancel ?? null;
+  };
+
+  const handleSendQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!question.trim() || isStreaming) return;
+
+    const currentQuestion = question.trim();
+    const prevChatLog = sessionId ? [] : chatLog;
+    setQuestion('');
+    setChatLog((prev) => [...prev, { sender: 'user', text: currentQuestion }]);
+    startQuestionStreaming(currentQuestion, prevChatLog);
+  };
+
+  const handleRetryQuestion = (questionText: string, errorMsgIndex: number) => {
+    if (isStreaming || !questionText.trim()) return;
+
+    const filteredLog = chatLog.filter((_, idx) => idx !== errorMsgIndex);
+    const userMsgIndex =
+      errorMsgIndex > 0 && chatLog[errorMsgIndex - 1]?.sender === 'user'
+        ? errorMsgIndex - 1
+        : -1;
+    const nextLog =
+      userMsgIndex >= 0
+        ? filteredLog
+        : [...filteredLog, { sender: 'user' as const, text: questionText }];
+    const prevChatLogForApi: ChatMessage[] =
+      userMsgIndex >= 0
+        ? (sessionId ? [] : chatLog.slice(0, userMsgIndex))
+        : (sessionId ? [] : filteredLog);
+
+    setChatLog(nextLog);
+    startQuestionStreaming(questionText, prevChatLogForApi);
+  };
+
+  const handleRestoreQuestion = (questionText: string) => {
+    setQuestion(questionText);
+    chatInputRef.current?.focus();
   };
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
@@ -1119,10 +1168,68 @@ export const AiService = () => {
                   </div>
                 )}
                 {chatLog.map((msg, idx) => (
-                  <div key={idx} className={`chat-message ${msg.sender}`}>
+                  <div
+                    key={idx}
+                    className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}`}
+                  >
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
-                        <>
+                        msg.isError ? (
+                          <div className="error-message-content">
+                            {msg.text && (
+                              <ReactMarkdown
+                                remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                                rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                              >
+                                {msg.text}
+                              </ReactMarkdown>
+                            )}
+                            <div className="error-banner" role="alert">
+                              <span className="error-icon" aria-hidden="true">
+                                ⚠
+                              </span>
+                              <span className="error-text">
+                                {msg.errorMessage || '답변 수신 도중 에러가 발생했습니다.'}
+                              </span>
+                            </div>
+                            <div className="message-actions error-actions">
+                              <button
+                                type="button"
+                                className="btn-retry-answer"
+                                onClick={() => {
+                                  const relatedQuestion =
+                                    chatLog
+                                      .slice(0, idx)
+                                      .reverse()
+                                      .find((m) => m.sender === 'user')?.text ||
+                                    lastFailedQuestionRef.current ||
+                                    '';
+                                  handleRetryQuestion(relatedQuestion, idx);
+                                }}
+                                disabled={isStreaming}
+                              >
+                                다시 시도
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-restore-question"
+                                onClick={() => {
+                                  const relatedQuestion =
+                                    chatLog
+                                      .slice(0, idx)
+                                      .reverse()
+                                      .find((m) => m.sender === 'user')?.text ||
+                                    lastFailedQuestionRef.current ||
+                                    '';
+                                  handleRestoreQuestion(relatedQuestion);
+                                }}
+                              >
+                                질문 복원
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
                           {(() => {
                             const isNoSources = !msg.sources || msg.sources.length === 0;
                             const isUngrounded =
@@ -1293,7 +1400,7 @@ export const AiService = () => {
                             />
                           )}
                         </>
-                      ) : (
+                      )) : (
                         msg.text
                       )}
                     </div>

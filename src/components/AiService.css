@@ -712,6 +712,99 @@
   border-bottom-left-radius: 3px;
 }
 
+.chat-message.ai.error .message-bubble {
+  background: hsla(350, 60%, 15%, 0.45);
+  border: 1px solid hsla(350, 70%, 55%, 0.4);
+  color: hsl(350, 15%, 90%);
+}
+
+.chat-message.ai.error .error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  background: hsla(350, 70%, 35%, 0.25);
+  border: 1px solid hsla(350, 70%, 50%, 0.3);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: hsl(350, 95%, 75%);
+}
+
+.chat-message.ai.error .error-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+
+.chat-message.ai.error .error-text {
+  word-break: break-word;
+}
+
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.btn-retry-answer,
+.btn-restore-question {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.btn-retry-answer {
+  background: hsla(265, 75%, 60%, 0.2);
+  border: 1px solid hsla(265, 75%, 65%, 0.4);
+  color: hsl(265, 90%, 85%);
+}
+
+.btn-retry-answer:hover:not(:disabled) {
+  background: hsla(265, 75%, 60%, 0.35);
+  border-color: hsla(265, 75%, 70%, 0.6);
+  color: #ffffff;
+}
+
+.btn-retry-answer:focus-visible {
+  outline: 2px solid hsl(265, 80%, 65%);
+  outline-offset: 1px;
+}
+
+.btn-retry-answer:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-restore-question {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: hsl(210, 15%, 85%);
+}
+
+.btn-restore-question:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.btn-restore-question:focus-visible {
+  outline: 2px solid hsl(265, 80%, 65%);
+  outline-offset: 1px;
+}
+
+.btn-restore-question:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .message-bubble.streaming {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.04);
