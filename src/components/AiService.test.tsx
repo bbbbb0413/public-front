@@ -5641,4 +5641,250 @@ describe('AiService Component', () => {
       expect(metricDocs).toHaveTextContent('2');
     });
   });
+
+  describe('SPEC-073: AI 답변 생성 실패 시 인라인 에러 표시 및 질문 재시도 지원', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    });
+
+    it('Given 사용자가 질문을 전송하고 백엔드 스트리밍 오류(onError)가 발생했을 때 When 에러가 수신되면 Then 상단 에러 배너와 함께 채팅 대화창 내 에러 메시지 버블이 표시되고 [다시 시도]와 [질문 복원] 버튼이 렌더링된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('백엔드 모델 연결 실패'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문서 요약해줘' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 상단 에러 배너 노출 확인
+      expect(screen.getByText('답변 수신 도중 에러가 발생했습니다.')).toBeInTheDocument();
+
+      // 에러 메시지 버블 확인
+      const errorMsgBubble = document.querySelector('.chat-message.ai.error');
+      expect(errorMsgBubble).toBeInTheDocument();
+      expect(errorMsgBubble).toHaveTextContent('답변을 생성하지 못했습니다.');
+      expect(errorMsgBubble).toHaveTextContent('백엔드 모델 연결 실패');
+
+      // 다시 시도 및 질문 복원 버튼 렌더링 확인
+      const retryBtn = screen.getByRole('button', { name: '다시 시도' });
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+      expect(retryBtn).toBeInTheDocument();
+      expect(restoreBtn).toBeInTheDocument();
+      expect(retryBtn).toHaveClass('btn-retry-answer');
+      expect(restoreBtn).toHaveClass('btn-restore-question');
+    });
+
+    it('Given 스트리밍 중 일부 텍스트가 수신된 후 onError가 발생했을 때 When 에러 버블이 렌더링되면 Then 기수신된 텍스트가 보존되어 함께 표시된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onMessage?.('중간에 생성된 유용한 50자 답변 내용입니다...');
+          onError?.(new Error('네트워크 연결 끊김'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '중간 생성 보존 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const errorMsgBubble = document.querySelector('.chat-message.ai.error');
+      expect(errorMsgBubble).toBeInTheDocument();
+      expect(errorMsgBubble).toHaveTextContent('중간에 생성된 유용한 50자 답변 내용입니다...');
+      expect(errorMsgBubble).toHaveTextContent('네트워크 연결 끊김');
+    });
+
+    it('Given 답변 생성 실패로 에러 버블이 표시된 상태에서 When 사용자가 [다시 시도] 버튼을 클릭하면 Then 직전 실패한 동일한 질문으로 스트리밍 재요청이 시작된다', async () => {
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((_q, _onMessage, _onDone, onError) => {
+        callCount++;
+        if (callCount === 1) {
+          Promise.resolve().then(() => {
+            onError?.(new Error('1회차 타임아웃'));
+          });
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '재시도 대상 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '다시 시도' });
+      expect(retryBtn).toBeInTheDocument();
+
+      // 다시 시도 클릭
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(callCount).toBe(2);
+      expect(aiApi.askQuestionStream).toHaveBeenLastCalledWith(
+        '재시도 대상 질문',
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(Function),
+        null,
+        [],
+        expect.any(Function),
+        null,
+        expect.any(Function),
+        expect.any(Function),
+      );
+    });
+
+    it('Given 스트리밍이 진행 중인 경우 When 에러 버블의 [다시 시도] 버튼을 확인하면 Then disabled 상태로 중복 요청이 방지된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('에러 발생'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 실패 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '다시 시도' });
+      expect(retryBtn).not.toBeDisabled();
+
+      // 두 번째 질문을 진행 중으로 만들어 스트리밍 상태 유지
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 스트리밍 중인 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(retryBtn).toBeDisabled();
+    });
+
+    it('Given 답변 생성 실패로 에러 버블이 표시된 상태에서 When 사용자가 [질문 복원] 버튼을 클릭하면 Then 하단 입력창에 실패한 질문이 채워지고 포커스가 이동한다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('일시적 오류'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '복원할 질문 내용' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 전송 직후 입력창은 비워짐
+      expect(input).toHaveValue('');
+
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+      await act(async () => {
+        fireEvent.click(restoreBtn);
+      });
+
+      // 복원 클릭 후 입력창에 질문 내용 채워짐 및 포커스 확인
+      expect(input).toHaveValue('복원할 질문 내용');
+      expect(input).toHaveFocus();
+    });
+
+    it('Given 정상적으로 생성이 완료된 AI 메시지인 경우 When 렌더링될 때 Then 재시도 및 질문 복원 버튼이 노출되지 않고 복사 버튼만 렌더링된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, onDone) => {
+        Promise.resolve().then(() => {
+          onMessage?.('정상 생성 답변입니다.');
+          onDone?.();
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '정상 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '질문 복원' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '답변 복사' })).toBeInTheDocument();
+      expect(document.querySelector('.chat-message.ai.error')).not.toBeInTheDocument();
+    });
+  });
 });
