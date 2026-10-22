@@ -52,6 +52,7 @@ interface ChatMessage {
   sources?: SourceRef[];
   isError?: boolean;
   errorMessage?: string;
+  isCancelled?: boolean;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -140,6 +141,7 @@ export const AiService = () => {
   const activeStreamCancelRef = useRef<(() => Promise<void>) | null>(null);
   const streamingAnswerRef = useRef<string>('');
   const lastFailedQuestionRef = useRef<string>('');
+  const lastCancelledQuestionRef = useRef<string>('');
 
   const fetchSessions = async (searchQuery?: string) => {
     if (!userId) return;
@@ -590,22 +592,24 @@ export const AiService = () => {
       await activeStreamCancelRef.current();
       activeStreamCancelRef.current = null;
     }
-    if (canceledText) {
-      setChatLog((prev) => [
-        ...prev,
-        {
-          sender: 'ai',
-          text: canceledText,
-        },
-      ]);
-    }
+    const messageText = canceledText || '답변 생성이 중단되었습니다.';
+    setChatLog((prev) => [
+      ...prev,
+      {
+        sender: 'ai',
+        text: messageText,
+        isCancelled: true,
+      },
+    ]);
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
+    setCurrentSources([]);
     setCurrentProgress(null);
     setIsStreaming(false);
   };
 
   const startQuestionStreaming = (currentQuestion: string, prevChatLog: ChatMessage[]) => {
+    lastCancelledQuestionRef.current = currentQuestion;
     setIsStreaming(true);
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
@@ -700,25 +704,32 @@ export const AiService = () => {
     startQuestionStreaming(currentQuestion, prevChatLog);
   };
 
-  const handleRetryQuestion = (questionText: string, errorMsgIndex: number) => {
+  const handleRetryQuestion = (questionText: string, errorMsgIndex?: number) => {
     if (isStreaming || !questionText.trim()) return;
 
-    const filteredLog = chatLog.filter((_, idx) => idx !== errorMsgIndex);
-    const userMsgIndex =
-      errorMsgIndex > 0 && chatLog[errorMsgIndex - 1]?.sender === 'user'
-        ? errorMsgIndex - 1
-        : -1;
-    const nextLog =
-      userMsgIndex >= 0
-        ? filteredLog
-        : [...filteredLog, { sender: 'user' as const, text: questionText }];
-    const prevChatLogForApi: ChatMessage[] =
-      userMsgIndex >= 0
-        ? (sessionId ? [] : chatLog.slice(0, userMsgIndex))
-        : (sessionId ? [] : filteredLog);
+    if (errorMsgIndex !== undefined) {
+      const filteredLog = chatLog.filter((_, idx) => idx !== errorMsgIndex);
+      const userMsgIndex =
+        errorMsgIndex > 0 && chatLog[errorMsgIndex - 1]?.sender === 'user'
+          ? errorMsgIndex - 1
+          : -1;
+      const nextLog =
+        userMsgIndex >= 0
+          ? filteredLog
+          : [...filteredLog, { sender: 'user' as const, text: questionText }];
+      const prevChatLogForApi: ChatMessage[] =
+        userMsgIndex >= 0
+          ? (sessionId ? [] : chatLog.slice(0, userMsgIndex))
+          : (sessionId ? [] : filteredLog);
 
-    setChatLog(nextLog);
-    startQuestionStreaming(questionText, prevChatLogForApi);
+      setChatLog(nextLog);
+      startQuestionStreaming(questionText, prevChatLogForApi);
+      return;
+    }
+
+    const prevChatLog = sessionId ? [] : chatLog;
+    setChatLog((prev) => [...prev, { sender: 'user', text: questionText.trim() }]);
+    startQuestionStreaming(questionText.trim(), prevChatLog);
   };
 
   const handleRestoreQuestion = (questionText: string) => {
@@ -1170,11 +1181,63 @@ export const AiService = () => {
                 {chatLog.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}`}
+                    className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}${msg.isCancelled ? ' cancelled' : ''}`}
                   >
                     <div className="message-bubble">
                       {msg.sender === 'ai' ? (
-                        msg.isError ? (
+                        msg.isCancelled ? (
+                          <div className="cancelled-message-content">
+                            <div className="cancelled-banner">
+                              <span className="cancelled-badge" data-testid="cancelled-badge">
+                                [생성 중단됨]
+                              </span>
+                            </div>
+                            {msg.text && (
+                              <ReactMarkdown
+                                remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                                rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                              >
+                                {msg.text}
+                              </ReactMarkdown>
+                            )}
+                            <div className="message-actions cancelled-actions">
+                              <button
+                                type="button"
+                                className="btn-retry-question"
+                                onClick={() => {
+                                  const relatedQuestion =
+                                    chatLog
+                                      .slice(0, idx)
+                                      .reverse()
+                                      .find((m) => m.sender === 'user')?.text ||
+                                    lastCancelledQuestionRef.current ||
+                                    '';
+                                  handleRetryQuestion(relatedQuestion);
+                                }}
+                                disabled={isStreaming}
+                              >
+                                다시 질문
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-restore-question"
+                                onClick={() => {
+                                  const relatedQuestion =
+                                    chatLog
+                                      .slice(0, idx)
+                                      .reverse()
+                                      .find((m) => m.sender === 'user')?.text ||
+                                    lastCancelledQuestionRef.current ||
+                                    '';
+                                  handleRestoreQuestion(relatedQuestion);
+                                }}
+                                disabled={isStreaming}
+                              >
+                                질문 복원
+                              </button>
+                            </div>
+                          </div>
+                        ) : msg.isError ? (
                           <div className="error-message-content">
                             {msg.text && (
                               <ReactMarkdown
