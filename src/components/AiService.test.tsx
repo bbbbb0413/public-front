@@ -5958,4 +5958,391 @@ describe('AiService Component', () => {
       expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeInTheDocument();
     });
   });
+
+  describe('SPEC-074: 답변 생성 중단 시 인라인 중단 상태 보존 및 미완성 안내·질문 복원 지원', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    });
+
+    it('Given 토큰이 수신되지 않은 초기 단계에서 When [중단]을 클릭하면 Then "답변 생성이 중단되었습니다." 안내 텍스트와 [생성 중단됨] 배지가 포함된 AI 메시지 버블이 생성된다', async () => {
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '초기 중단 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 아직 아무 토큰도 수신되지 않은 상태에서 [중단] 버튼 클릭
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(cancelMock).toHaveBeenCalled();
+      const cancelledBubble = document.querySelector('.chat-message.ai.cancelled') as HTMLElement;
+      expect(cancelledBubble).toBeInTheDocument();
+      expect(within(cancelledBubble).getByText('[생성 중단됨]')).toBeInTheDocument();
+      expect(within(cancelledBubble).getByText('답변 생성이 중단되었습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 스트리밍 도중 일부 텍스트가 수신된 상태에서 When [중단]을 클릭하면 Then 기수신된 텍스트가 보존되고 [생성 중단됨] 배지가 렌더링된다', async () => {
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage) => {
+        setTimeout(() => {
+          onMessage?.('지금까지 생성된 40자의 부분 텍스트 답변 내용입니다.');
+        }, 10);
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '부분 생성 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(cancelMock).toHaveBeenCalled();
+      const cancelledBubble = document.querySelector('.chat-message.ai.cancelled') as HTMLElement;
+      expect(cancelledBubble).toBeInTheDocument();
+      expect(within(cancelledBubble).getByText('[생성 중단됨]')).toBeInTheDocument();
+      expect(
+        within(cancelledBubble).getByText('지금까지 생성된 40자의 부분 텍스트 답변 내용입니다.'),
+      ).toBeInTheDocument();
+    });
+
+    it('Given 중단된 AI 메시지 버블이 렌더링된 상태에서 When 하단 액션 영역을 확인할 때 Then AnswerFeedback은 표시되지 않고 [질문 복원] 및 [다시 질문] 버튼이 노출된다', async () => {
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '피드백 미노출 확인 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // AnswerFeedback 관련 요소는 없어야 함
+      expect(screen.queryByText(/이 답변을 평가하기/i)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('answer-feedback-root')).not.toBeInTheDocument();
+
+      // [질문 복원] 및 [다시 질문] 버튼 노출 확인
+      expect(screen.getByRole('button', { name: '질문 복원' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '다시 질문' })).toBeInTheDocument();
+    });
+
+    it('Given 중단된 AI 메시지 버블 내 [질문 복원] 버튼이 있는 상태에서 When 버튼을 클릭하면 Then 하단 입력창에 질문이 채워지고 포커스된다', async () => {
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '복원 대상 질문 텍스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(input).toHaveValue('');
+
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+      await act(async () => {
+        fireEvent.click(restoreBtn);
+      });
+
+      expect(input).toHaveValue('복원 대상 질문 텍스트');
+      expect(input).toHaveFocus();
+    });
+
+    it('Given 중단된 AI 메시지 버블 내 [다시 질문] 버튼이 있는 상태에서 When 버튼을 클릭하면 Then 해당 질문으로 즉시 새 스트리밍이 시작된다', async () => {
+      let callCount = 0;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((_q, onMessage, onDone) => {
+        callCount++;
+        if (callCount === 1) {
+          return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+        }
+        setTimeout(() => {
+          onMessage?.('재질문에 대한 정상 생성 답변입니다.');
+          onDone?.();
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '다시 질문할 대상' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(callCount).toBe(1);
+
+      const retryBtn = screen.getByRole('button', { name: '다시 질문' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(callCount).toBe(2);
+      expect(aiApi.askQuestionStream).toHaveBeenLastCalledWith(
+        '다시 질문할 대상',
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(Function),
+        null,
+        expect.any(Array),
+        expect.any(Function),
+        null,
+        expect.any(Function),
+        expect.any(Function),
+      );
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(
+        screen.getAllByText('재질문에 대한 정상 생성 답변입니다.').length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    it('Given 다른 질문으로 스트리밍이 진행 중일 때 When 기존 중단 버블의 액션 버튼을 확인하면 Then [질문 복원] 및 [다시 질문] 버튼이 모두 disabled 상태가 된다', async () => {
+      let cancelCalled = false;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation(() => {
+        return {
+          cancel: vi.fn().mockImplementation(() => {
+            cancelCalled = true;
+          }),
+        } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1. 첫 번째 질문 후 중단
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      expect(cancelCalled).toBe(true);
+
+      // 2. 두 번째 질문 전송하여 현재 스트리밍 진행 상태로 만듦
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 스트리밍 진행 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 이제 isStreaming === true 상태임
+      const retryBtn = screen.getByRole('button', { name: '다시 질문' });
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+
+      expect(retryBtn).toBeDisabled();
+      expect(restoreBtn).toBeDisabled();
+    });
+
+    it('Given 정상 완료된 AI 메시지인 경우 When 렌더링될 때 Then [생성 중단됨] 배지 및 [질문 복원]/[다시 질문] 버튼이 표시되지 않고 복사 기능이 노출된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, onDone) => {
+        setTimeout(() => {
+          onMessage?.('정상적으로 생성이 완료된 답변 내용입니다.');
+          onDone?.();
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '완료 테스트 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(
+        screen.getAllByText('정상적으로 생성이 완료된 답변 내용입니다.').length,
+      ).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText('[생성 중단됨]')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '질문 복원' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '다시 질문' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /답변 복사/i })).toBeInTheDocument();
+    });
+
+    it('Given 여러 질문 중 특정 질문이 중단된 경우 When 이전 중단 버블의 [질문 복원]을 클릭하면 Then 직전 질문이 아닌 해당 중단 턴의 질문이 정확히 복원된다', async () => {
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((q, onMessage, onDone) => {
+        callCount++;
+        if (callCount === 1) {
+          // 첫 번째 질문: 중단됨
+          return { cancel: vi.fn().mockResolvedValue(undefined) } as unknown as ReturnType<
+            typeof aiApi.askQuestionStream
+          >;
+        }
+        // 두 번째 질문: 완료됨
+        setTimeout(() => {
+          onMessage?.('두 번째 답변 완료: ' + q);
+          onDone?.();
+        }, 10);
+        return { cancel: vi.fn().mockResolvedValue(undefined) } as unknown as ReturnType<
+          typeof aiApi.askQuestionStream
+        >;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 첫 번째 질문 전송 후 중단
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 중단 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // 두 번째 질문 전송 및 완료 대기
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 완료 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+      });
+
+      expect(
+        screen.getAllByText('두 번째 답변 완료: 두 번째 완료 질문').length,
+      ).toBeGreaterThanOrEqual(1);
+
+      // 첫 번째 중단 버블의 [질문 복원] 클릭
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+      await act(async () => {
+        fireEvent.click(restoreBtn);
+      });
+
+      // 가장 마지막 질문('두 번째 완료 질문')이 아니라 첫 번째 중단 질문('첫 번째 중단 질문')이 복원되어야 함
+      expect(input).toHaveValue('첫 번째 중단 질문');
+      expect(input).toHaveFocus();
+    });
+  });
 });
