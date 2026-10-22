@@ -6238,7 +6238,7 @@ describe('AiService Component', () => {
       expect(restoreBtn).toBeDisabled();
     });
 
-    it('Given 정상 완료된 AI 메시지인 경우 When 렌더링될 때 Then [생성 중단됨] 배지 및 [질문 복원]/[다시 질문] 버튼이 표시되지 않는다', async () => {
+    it('Given 정상 완료된 AI 메시지인 경우 When 렌더링될 때 Then [생성 중단됨] 배지 및 [질문 복원]/[다시 질문] 버튼이 표시되지 않고 복사 기능이 노출된다', async () => {
       vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, onDone) => {
         setTimeout(() => {
           onMessage?.('정상적으로 생성이 완료된 답변 내용입니다.');
@@ -6274,6 +6274,75 @@ describe('AiService Component', () => {
       expect(screen.queryByText('[생성 중단됨]')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '질문 복원' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '다시 질문' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /답변 복사/i })).toBeInTheDocument();
+    });
+
+    it('Given 여러 질문 중 특정 질문이 중단된 경우 When 이전 중단 버블의 [질문 복원]을 클릭하면 Then 직전 질문이 아닌 해당 중단 턴의 질문이 정확히 복원된다', async () => {
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((q, onMessage, onDone) => {
+        callCount++;
+        if (callCount === 1) {
+          // 첫 번째 질문: 중단됨
+          return { cancel: vi.fn().mockResolvedValue(undefined) } as unknown as ReturnType<
+            typeof aiApi.askQuestionStream
+          >;
+        }
+        // 두 번째 질문: 완료됨
+        setTimeout(() => {
+          onMessage?.('두 번째 답변 완료: ' + q);
+          onDone?.();
+        }, 10);
+        return { cancel: vi.fn().mockResolvedValue(undefined) } as unknown as ReturnType<
+          typeof aiApi.askQuestionStream
+        >;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 첫 번째 질문 전송 후 중단
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 중단 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const cancelBtn = screen.getByRole('button', { name: '중단' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+
+      // 두 번째 질문 전송 및 완료 대기
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 완료 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+      });
+
+      expect(
+        screen.getAllByText('두 번째 답변 완료: 두 번째 완료 질문').length,
+      ).toBeGreaterThanOrEqual(1);
+
+      // 첫 번째 중단 버블의 [질문 복원] 클릭
+      const restoreBtn = screen.getByRole('button', { name: '질문 복원' });
+      await act(async () => {
+        fireEvent.click(restoreBtn);
+      });
+
+      // 가장 마지막 질문('두 번째 완료 질문')이 아니라 첫 번째 중단 질문('첫 번째 중단 질문')이 복원되어야 함
+      expect(input).toHaveValue('첫 번째 중단 질문');
+      expect(input).toHaveFocus();
     });
   });
 });
