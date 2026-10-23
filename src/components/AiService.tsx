@@ -737,6 +737,11 @@ export const AiService = () => {
     chatInputRef.current?.focus();
   };
 
+  const handleAskMissingItem = (itemText: string) => {
+    setQuestion(`"${itemText.trim()}"에 대해 자세히 설명해 줘`);
+    chatInputRef.current?.focus();
+  };
+
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
 
   const completedDocsCount = documents.filter((d) => d.status === 'processed' || d.status === 'completed').length;
@@ -1183,7 +1188,12 @@ export const AiService = () => {
                     key={idx}
                     className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}${msg.isCancelled ? ' cancelled' : ''}`}
                   >
-                    <div className="message-bubble">
+                    <div className={`message-bubble${msg.sender === 'ai' && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}`}>
+                      {msg.sender === 'ai' && msg.missing && msg.missing.length > 0 && (
+                        <div className="missing-warning-badge" data-testid="missing-warning-badge">
+                          추가 확인 필요
+                        </div>
+                      )}
                       {msg.sender === 'ai' ? (
                         msg.isCancelled ? (
                           <div className="cancelled-message-content">
@@ -1351,7 +1361,16 @@ export const AiService = () => {
                               <ul className="missing-list">
                                 {msg.missing.map((item, mIdx) => (
                                   <li key={mIdx} className="missing-item">
-                                    {item}
+                                    <span className="missing-item-text">{item}</span>
+                                    <button
+                                      type="button"
+                                      className="btn-ask-missing"
+                                      onClick={() => handleAskMissingItem(item)}
+                                      disabled={isStreaming}
+                                      aria-label={`${item}에 대해 질문하기`}
+                                    >
+                                      질문하기
+                                    </button>
                                   </li>
                                 ))}
                               </ul>
