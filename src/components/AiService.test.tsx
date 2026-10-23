@@ -6345,4 +6345,381 @@ describe('AiService Component', () => {
       expect(input).toHaveFocus();
     });
   });
+
+  describe('SPEC-075: RAG 답변의 확인하지 못한 항목(missing) 보완 질문 원클릭 연계 및 불완전 답변 주의 안내', () => {
+    it('AC-1 & AC-2: missing 항목이 있는 경우 has-missing 클래스와 주의 배지 및 질문하기 버튼이 렌더링되고 클릭 시 질문창에 템플릿이 입력되고 포커스된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('JWT 인증 방식에 대한 답변입니다.');
+            onDone({
+              confidence: 0.75,
+              missing: ['JWT 만료 시 갱신 흐름'],
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'JWT 인증 흐름 알려줘' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      // AC-2: 주의 배지 및 has-missing 클래스 검증
+      const warningBadge = screen.getByTestId('missing-warning-badge');
+      expect(warningBadge).toBeInTheDocument();
+      expect(warningBadge).toHaveTextContent('추가 확인 필요');
+
+      const messageBubble = warningBadge.closest('.message-bubble');
+      expect(messageBubble).toHaveClass('has-missing');
+
+      // AC-1: [질문하기] 버튼 렌더링 및 클릭 인터랙션 검증
+      const askMissingBtn = screen.getByRole('button', { name: 'JWT 만료 시 갱신 흐름에 대해 질문하기' });
+      expect(askMissingBtn).toBeInTheDocument();
+      expect(askMissingBtn).toHaveClass('btn-ask-missing');
+      expect(askMissingBtn).toHaveTextContent('질문하기');
+
+      await act(async () => {
+        fireEvent.click(askMissingBtn);
+      });
+
+      expect(input).toHaveValue('"JWT 만료 시 갱신 흐름"에 대해 자세히 설명해 줘');
+      expect(input).toHaveFocus();
+    });
+
+    it('AC-3: 스트리밍 진행 중(isStreaming === true)일 때는 모든 [질문하기] 버튼이 disabled 상태가 된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      let resolveStream: () => void;
+      const streamPromise = new Promise<void>((resolve) => {
+        resolveStream = resolve;
+      });
+
+      // 첫 번째 질문 완료 (missing 포함)
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('첫 번째 답변');
+            onDone({
+              confidence: 0.6,
+              missing: ['누락 항목 1'],
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      const askMissingBtn = screen.getByRole('button', { name: '누락 항목 1에 대해 질문하기' });
+      expect(askMissingBtn).not.toBeDisabled();
+
+      // 두 번째 질문 전송하여 스트리밍 상태 유지
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => streamPromise);
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 스트리밍 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 스트리밍 중에는 disabled여야 함
+      expect(askMissingBtn).toBeDisabled();
+
+      // 스트리밍 종료 후 해제
+      await act(async () => {
+        resolveStream!();
+      });
+    });
+
+    it('AC-4: missing 필드가 없거나 빈 배열([])인 정상 답변의 경우 has-missing 클래스, missing-warning-badge, missing-info가 일절 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('완벽한 정상 답변입니다.');
+            onDone({
+              confidence: 0.95,
+              missing: [],
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '정상 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+      const messageBubbles = document.querySelectorAll('.message-bubble');
+      messageBubbles.forEach((bubble) => {
+        expect(bubble).not.toHaveClass('has-missing');
+      });
+    });
+
+    it('AC-5: 세션 복원(handleLoadSession) 시에도 missing 항목에 대한 주의 배지와 질문하기 버튼이 정상 복원되고 동작한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockAuth = {
+        user: { uuid: 'test-user-id', nickName: 'Tester' },
+        token: 'jwt-token',
+        isAuthenticated: true,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+      };
+      const mockSessionDetail = {
+        sessionId: 'sess-missing-test',
+        title: '결손 세션 테스트',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '인증 아키텍처 알려줘',
+            createdAt: '2026-10-24T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '인증 아키텍처 개요입니다.',
+            createdAt: '2026-10-24T00:00:01Z',
+            confidence: 0.7,
+            iterations: 2,
+            missing: ['OAuth2 리프레시 토큰 로테이션'],
+          },
+        ],
+        createdAt: '2026-10-24T00:00:00Z',
+        updatedAt: '2026-10-24T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-missing-test',
+          title: '결손 세션 테스트',
+          updatedAt: '2026-10-24T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('결손 세션 테스트');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 복원된 AI 메시지 버블 확인
+      const warningBadge = screen.getByTestId('missing-warning-badge');
+      expect(warningBadge).toBeInTheDocument();
+      expect(warningBadge.closest('.message-bubble')).toHaveClass('has-missing');
+
+      const askBtn = screen.getByRole('button', { name: 'OAuth2 리프레시 토큰 로테이션에 대해 질문하기' });
+      expect(askBtn).toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.click(askBtn);
+      });
+
+      expect(input).toHaveValue('"OAuth2 리프레시 토큰 로테이션"에 대해 자세히 설명해 줘');
+      expect(input).toHaveFocus();
+    });
+
+    it('QA 경계 조건: 복수 missing 항목 렌더링, 앞뒤 공백 트리밍 및 기존 입력값 덮어쓰기 검증', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('두 건의 결손 항목이 있는 답변');
+            onDone({
+              confidence: 0.65,
+              missing: ['  첫 번째 누락 항목  ', '두 번째 누락 항목'],
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '초기 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      // 복수 버튼 확인
+      const askBtn1 = screen.getByRole('button', { name: '첫 번째 누락 항목 에 대해 질문하기' });
+      const askBtn2 = screen.getByRole('button', { name: '두 번째 누락 항목에 대해 질문하기' });
+      expect(askBtn1).toBeInTheDocument();
+      expect(askBtn2).toBeInTheDocument();
+
+      // 사용자가 입력창에 미리 타이핑해 둔 상태 가정
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '기존에 작성 중이던 다른 질문 내용' } });
+      });
+
+      // 공백이 포함된 첫 번째 누락 항목 클릭 시 트림되어 덮어써지는지 검증
+      await act(async () => {
+        fireEvent.click(askBtn1);
+      });
+      expect(input).toHaveValue('"첫 번째 누락 항목"에 대해 자세히 설명해 줘');
+      expect(input).toHaveFocus();
+
+      // 두 번째 누락 항목 클릭 시 다시 치환되는지 검증
+      await act(async () => {
+        fireEvent.click(askBtn2);
+      });
+      expect(input).toHaveValue('"두 번째 누락 항목"에 대해 자세히 설명해 줘');
+      expect(input).toHaveFocus();
+    });
+
+    it('QA 안전성 검증: 사용자 메시지 및 missing 필드가 없는 AI 메시지에는 has-missing 및 배지가 절대 표시되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (
+          _question,
+          onMessage,
+          onDone,
+        ) => {
+          setTimeout(() => {
+            onMessage('missing 필드가 아예 없는 레거시 응답');
+            // missing 필드 미제공
+            onDone({
+              confidence: 0.9,
+              iterations: 1,
+            });
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '레거시 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+
+      expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+      const bubbles = document.querySelectorAll('.message-bubble');
+      expect(bubbles.length).toBeGreaterThanOrEqual(2); // user bubble + ai bubble
+      bubbles.forEach((bubble) => {
+        expect(bubble).not.toHaveClass('has-missing');
+      });
+    });
+  });
 });
