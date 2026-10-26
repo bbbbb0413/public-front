@@ -37,6 +37,7 @@ import {
   submitAnswerFeedback,
   getSessionFeedback,
   deleteAnswerFeedback,
+  getDocumentChunks,
 } from './ai';
 
 const mockAxios = axios as unknown as {
@@ -954,6 +955,26 @@ describe('AI Service API (Gateway 경유)', () => {
       await expect(deleteAnswerFeedback('invalid-session', 99)).rejects.toThrow('Request failed with status code 404');
       expect(mockAxios.delete).toHaveBeenCalledWith('/ai/feedback', {
         params: { sessionId: 'invalid-session', turnIndex: 99 },
+      });
+    });
+
+    describe('getDocumentChunks (SPEC-083)', () => {
+      it('should fetch document chunks from /ai/knowledge/documents/:id/chunks', async () => {
+        const mockChunks = [
+          { chunkIndex: 0, text: '첫 번째 청크 본문' },
+          { chunkIndex: 1, text: '두 번째 청크 본문' },
+        ];
+        mockAxios.get.mockResolvedValueOnce({ data: mockChunks });
+
+        const result = await getDocumentChunks('doc-123');
+        expect(mockAxios.get).toHaveBeenCalledWith('/ai/knowledge/documents/doc-123/chunks');
+        expect(result).toEqual(mockChunks);
+      });
+
+      it('should propagate error when chunk retrieval fails', async () => {
+        mockAxios.get.mockRejectedValueOnce(new Error('Network error'));
+
+        await expect(getDocumentChunks('doc-err')).rejects.toThrow('Network error');
       });
     });
   });
