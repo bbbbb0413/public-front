@@ -421,6 +421,17 @@ export const getDocumentFile = async (documentId: string): Promise<Blob> => {
   return response.data;
 };
 
+export interface DocumentChunk {
+  chunkIndex: number;
+  text: string;
+}
+
+/** 문서의 청크 목록을 조회한다 (SPEC-083) */
+export const getDocumentChunks = async (documentId: string): Promise<DocumentChunk[]> => {
+  const response = await client.get<DocumentChunk[]>(`/ai/knowledge/documents/${documentId}/chunks`);
+  return response.data;
+};
+
 interface ConversationTurn {
   role: 'user' | 'assistant';
   content: string;

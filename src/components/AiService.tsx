@@ -26,6 +26,8 @@ import {
   submitAnswerFeedback,
   getSessionFeedback,
   deleteAnswerFeedback,
+  getDocumentChunks,
+  DocumentChunk,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
 import { AnswerFeedback } from './AnswerFeedback';
@@ -117,6 +119,11 @@ export const AiService = () => {
 
   const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
+
+  const [viewingChunksDoc, setViewingChunksDoc] = useState<DocumentInfo | null>(null);
+  const [chunks, setChunks] = useState<DocumentChunk[]>([]);
+  const [isLoadingChunks, setIsLoadingChunks] = useState<boolean>(false);
+  const [chunksError, setChunksError] = useState<string | null>(null);
 
   const showBookmarkToast = (msg: string) => {
     setBookmarkSuccessMsg(msg);
@@ -556,6 +563,39 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingSession, isDeletingSession]);
 
+  const handleOpenChunks = async (doc: DocumentInfo) => {
+    setViewingChunksDoc(doc);
+    setIsLoadingChunks(true);
+    setChunksError(null);
+    setChunks([]);
+    try {
+      const data = await getDocumentChunks(doc.id);
+      setChunks(data);
+    } catch {
+      setChunksError('청크 목록을 불러오지 못했습니다.');
+    } finally {
+      setIsLoadingChunks(false);
+    }
+  };
+
+  const handleCloseChunksModal = () => {
+    setViewingChunksDoc(null);
+    setChunks([]);
+    setChunksError(null);
+    setIsLoadingChunks(false);
+  };
+
+  useEffect(() => {
+    if (!viewingChunksDoc) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCloseChunksModal();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [viewingChunksDoc]);
+
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
   };
@@ -915,7 +955,20 @@ export const AiService = () => {
                           <td>
                             <span className={`status-badge ${doc.status}`}>{statusContent}</span>
                           </td>
-                          <td>{doc.chunkCount}</td>
+                          <td>
+                            {isCompleted ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenChunks(doc)}
+                                className="btn-chunk-count"
+                                title="청크 목록 보기"
+                              >
+                                {doc.chunkCount}
+                              </button>
+                            ) : (
+                              doc.chunkCount
+                            )}
+                          </td>
                           <td className="doc-created-at">{formattedCreatedAt}</td>
                           <td>
                             <div className="doc-actions">
@@ -923,15 +976,25 @@ export const AiService = () => {
                                 <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
                               )}
                               {isCompleted && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadDocument(doc)}
-                                  className="btn-download"
-                                  disabled={downloadingDocId === doc.id}
-                                  title="문서 다운로드"
-                                >
-                                  {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChunks(doc)}
+                                    className="btn-view-chunks"
+                                    title="청크 보기"
+                                  >
+                                    청크 보기
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadDocument(doc)}
+                                    className="btn-download"
+                                    disabled={downloadingDocId === doc.id}
+                                    title="문서 다운로드"
+                                  >
+                                    {downloadingDocId === doc.id ? '다운로드 중...' : '다운로드'}
+                                  </button>
+                                </>
                               )}
                               <button onClick={() => handleDeleteClick(doc)} className="btn-delete">삭제</button>
                             </div>
@@ -1737,6 +1800,76 @@ export const AiService = () => {
                 disabled={isDeletingSession}
               >
                 {isDeletingSession ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 청크 열람 모달 (SPEC-083) */}
+      {viewingChunksDoc && (
+        <div
+          className="chunks-modal-overlay chat-modal-overlay"
+          data-testid="chunks-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCloseChunksModal();
+          }}
+          role="presentation"
+        >
+          <div
+            className="chunks-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chunks-modal-title"
+          >
+            <div className="chunks-modal-header">
+              <div className="chunks-modal-title-row">
+                <h3 id="chunks-modal-title" className="chunks-modal-title">
+                  "{viewingChunksDoc.fileName}" 청크 목록
+                </h3>
+                <span className="chunks-modal-count">총 {viewingChunksDoc.chunkCount}개</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseChunksModal}
+                className="btn-close-chunks"
+                aria-label="청크 모달 닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="chunks-modal-body">
+              {isLoadingChunks && (
+                <div className="chunks-modal-loading">청크 목록을 불러오는 중...</div>
+              )}
+              {!isLoadingChunks && chunksError && (
+                <div className="chunks-modal-error">{chunksError}</div>
+              )}
+              {!isLoadingChunks && !chunksError && chunks.length === 0 && (
+                <div className="chunks-modal-empty">색인된 청크가 없습니다.</div>
+              )}
+              {!isLoadingChunks && !chunksError && chunks.length > 0 && (
+                <div className="chunk-list">
+                  {chunks.map((chunk) => (
+                    <div key={chunk.chunkIndex} className="chunk-item">
+                      <div className="chunk-item-header">
+                        <span className="chunk-badge">청크 #{chunk.chunkIndex + 1}</span>
+                      </div>
+                      <pre className="chunk-text">{chunk.text}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="chunks-modal-footer">
+              <button
+                type="button"
+                onClick={handleCloseChunksModal}
+                className="btn-close-chunks-footer"
+              >
+                닫기
               </button>
             </div>
           </div>

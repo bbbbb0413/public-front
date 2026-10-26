@@ -29,6 +29,7 @@ vi.mock('../api/ai', () => {
     activateMyPrompt: vi.fn(),
     resetMyPrompt: vi.fn(),
     deleteMyPromptVersion: vi.fn(),
+    getDocumentChunks: vi.fn(),
   };
 });
 
@@ -6720,6 +6721,333 @@ describe('AiService Component', () => {
       bubbles.forEach((bubble) => {
         expect(bubble).not.toHaveClass('has-missing');
       });
+    });
+  });
+
+  describe('Document Chunks Modal (SPEC-083)', () => {
+    const completedDoc = {
+      id: 'doc-completed-1',
+      fileName: 'spec-guide.pdf',
+      status: 'completed',
+      chunkCount: 3,
+      createdAt: '2026-10-20T10:00:00Z',
+    };
+
+    const processedDoc = {
+      id: 'doc-processed-1',
+      fileName: 'manual.pdf',
+      status: 'processed',
+      chunkCount: 2,
+      createdAt: '2026-10-21T10:00:00Z',
+    };
+
+    const processingDoc = {
+      id: 'doc-processing-1',
+      fileName: 'in-progress.pdf',
+      status: 'processing',
+      chunkCount: 0,
+      createdAt: '2026-10-22T10:00:00Z',
+    };
+
+    const pendingDoc = {
+      id: 'doc-pending-1',
+      fileName: 'queued.pdf',
+      status: 'pending',
+      chunkCount: 0,
+      createdAt: '2026-10-22T11:00:00Z',
+    };
+
+    const failedDoc = {
+      id: 'doc-failed-1',
+      fileName: 'error.pdf',
+      status: 'failed',
+      chunkCount: 0,
+      createdAt: '2026-10-23T10:00:00Z',
+    };
+
+    const mockChunks = [
+      { chunkIndex: 0, text: '첫 번째 청크 텍스트 본문입니다.' },
+      { chunkIndex: 1, text: '두 번째 청크 텍스트 본문입니다.' },
+      { chunkIndex: 2, text: '세 번째 청크 텍스트 본문입니다.' },
+    ];
+
+    it('renders chunk count button and [청크 보기] button for completed/processed documents', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc, processedDoc]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chunkCountButtons = document.querySelectorAll('.btn-chunk-count');
+      expect(chunkCountButtons.length).toBe(2);
+      expect(chunkCountButtons[0].textContent).toBe('3');
+      expect(chunkCountButtons[1].textContent).toBe('2');
+
+      const viewChunksButtons = document.querySelectorAll('.btn-view-chunks');
+      expect(viewChunksButtons.length).toBe(2);
+      expect(viewChunksButtons[0].textContent).toBe('청크 보기');
+    });
+
+    it('renders plain text chunk count and does not render [청크 보기] button for pending/processing/failed documents', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([pendingDoc, processingDoc, failedDoc]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chunkCountButtons = document.querySelectorAll('.btn-chunk-count');
+      expect(chunkCountButtons.length).toBe(0);
+
+      const viewChunksButtons = document.querySelectorAll('.btn-view-chunks');
+      expect(viewChunksButtons.length).toBe(0);
+
+      const rows = document.querySelectorAll('tbody tr');
+      expect(rows.length).toBe(3);
+      // 청크 수 셀에 0 텍스트가 일반 텍스트로 렌더링됨
+      expect(rows[0].children[2].textContent).toBe('0');
+      expect(rows[1].children[2].textContent).toBe('0');
+      expect(rows[2].children[2].textContent).toBe('0');
+    });
+
+    it('opens chunk modal and renders chunks when [청크 보기] button is clicked', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-completed-1');
+
+      const modal = screen.getByRole('dialog', { name: /청크 목록/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText(/"spec-guide.pdf" 청크 목록/)).toBeInTheDocument();
+      expect(screen.getByText(/총 3개/)).toBeInTheDocument();
+
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+      expect(screen.getByText('첫 번째 청크 텍스트 본문입니다.')).toBeInTheDocument();
+      expect(screen.getByText('청크 #2')).toBeInTheDocument();
+      expect(screen.getByText('두 번째 청크 텍스트 본문입니다.')).toBeInTheDocument();
+      expect(screen.getByText('청크 #3')).toBeInTheDocument();
+      expect(screen.getByText('세 번째 청크 텍스트 본문입니다.')).toBeInTheDocument();
+    });
+
+    it('opens chunk modal when chunk count button is clicked', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([processedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks.slice(0, 2));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chunkCountBtn = screen.getByRole('button', { name: '2' });
+      await act(async () => {
+        fireEvent.click(chunkCountBtn);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-processed-1');
+      expect(screen.getByText(/"manual.pdf" 청크 목록/)).toBeInTheDocument();
+      expect(screen.getByText(/총 2개/)).toBeInTheDocument();
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+      expect(screen.getByText('청크 #2')).toBeInTheDocument();
+    });
+
+    it('shows loading indicator while fetching chunks', async () => {
+      let resolveChunks!: (value: aiApi.DocumentChunk[]) => void;
+      const chunksPromise = new Promise<aiApi.DocumentChunk[]>((resolve) => {
+        resolveChunks = resolve;
+      });
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockReturnValueOnce(chunksPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByText('청크 목록을 불러오는 중...')).toBeInTheDocument();
+
+      await act(async () => {
+        resolveChunks!(mockChunks);
+      });
+
+      expect(screen.queryByText('청크 목록을 불러오는 중...')).not.toBeInTheDocument();
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+    });
+
+    it('shows empty message when chunk list is empty', async () => {
+      const zeroChunkDoc = {
+        ...completedDoc,
+        id: 'doc-zero',
+        fileName: 'empty.pdf',
+        chunkCount: 0,
+      };
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([zeroChunkDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce([]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByText('색인된 청크가 없습니다.')).toBeInTheDocument();
+    });
+
+    it('shows error message when chunk retrieval fails', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockRejectedValueOnce(new Error('500 Internal Server Error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByText('청크 목록을 불러오지 못했습니다.')).toBeInTheDocument();
+    });
+
+    it('closes modal when top close button (✕) is clicked', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      const topCloseBtn = screen.getByRole('button', { name: '청크 모달 닫기' });
+      await act(async () => {
+        fireEvent.click(topCloseBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('closes modal when bottom [닫기] button is clicked', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      const bottomCloseBtn = document.querySelector('.btn-close-chunks-footer') as HTMLButtonElement;
+      expect(bottomCloseBtn).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(bottomCloseBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('closes modal when backdrop overlay is clicked', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      const overlay = document.querySelector('.chunks-modal-overlay') as HTMLElement;
+      expect(overlay).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('closes modal when Escape key is pressed', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('clears error and resets state when modal is closed after error and reopened for another document', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce([completedDoc, processedDoc]);
+      // 첫 번째 문서는 에러 발생
+      vi.mocked(aiApi.getDocumentChunks).mockRejectedValueOnce(new Error('500 Server Error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const viewChunksButtons = screen.getAllByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksButtons[0]);
+      });
+
+      expect(screen.getByText('청크 목록을 불러오지 못했습니다.')).toBeInTheDocument();
+
+      // 모달 닫기
+      const closeBtn = screen.getByRole('button', { name: '청크 모달 닫기' });
+      await act(async () => {
+        fireEvent.click(closeBtn);
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 두 번째 문서는 정상 응답
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValueOnce(mockChunks.slice(0, 2));
+      await act(async () => {
+        fireEvent.click(viewChunksButtons[1]);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.queryByText('청크 목록을 불러오지 못했습니다.')).not.toBeInTheDocument();
+      expect(screen.getByText(/"manual.pdf" 청크 목록/)).toBeInTheDocument();
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+      expect(screen.getByText('청크 #2')).toBeInTheDocument();
     });
   });
 });
