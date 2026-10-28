@@ -7240,5 +7240,85 @@ describe('AiService Component', () => {
       expect(screen.getByRole('button', { name: '답변 보관' })).toBeInTheDocument();
       expect(screen.getByTestId('answer-feedback')).toBeInTheDocument();
     });
+
+    it('Given 정상 완료된 턴과 중단된 턴이 공존하는 멀티턴 세션 When 세션을 복원하면 Then 각 턴의 상태에 맞게 정상 UI와 중단 UI가 각각 올바르게 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-mixed-1',
+        title: '멀티턴 혼합 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '첫 번째 정상 질문',
+            createdAt: '2026-10-29T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '첫 번째 정상 답변입니다.',
+            createdAt: '2026-10-29T00:00:01Z',
+            confidence: 0.9,
+            isCancelled: false,
+          },
+          {
+            role: 'user' as const,
+            content: '두 번째 중단될 질문',
+            createdAt: '2026-10-29T00:00:02Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '두 번째 생성 도중 중단된 답변',
+            createdAt: '2026-10-29T00:00:03Z',
+            isCancelled: true,
+          },
+        ],
+        createdAt: '2026-10-29T00:00:00Z',
+        updatedAt: '2026-10-29T00:00:03Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-mixed-1',
+          title: '멀티턴 혼합 세션',
+          updatedAt: '2026-10-29T00:00:03Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('멀티턴 혼합 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 1턴 어시스턴트 메시지 검증 (정상)
+      const normalAnswer = screen.getByText('첫 번째 정상 답변입니다.');
+      const normalBubble = normalAnswer.closest('.chat-message') as HTMLElement;
+      expect(normalBubble).not.toHaveClass('cancelled');
+      expect(within(normalBubble).getByRole('button', { name: '답변 복사' })).toBeInTheDocument();
+      expect(within(normalBubble).getByRole('button', { name: '답변 보관' })).toBeInTheDocument();
+      expect(within(normalBubble).getByTestId('answer-feedback')).toBeInTheDocument();
+
+      // 2턴 어시스턴트 메시지 검증 (중단)
+      const cancelledBadge = screen.getByTestId('cancelled-badge');
+      expect(cancelledBadge).toBeInTheDocument();
+      const cancelledBubble = cancelledBadge.closest('.chat-message') as HTMLElement;
+      expect(cancelledBubble).toHaveClass('cancelled');
+      expect(within(cancelledBubble).getByText('두 번째 생성 도중 중단된 답변')).toBeInTheDocument();
+      expect(within(cancelledBubble).queryByTestId('answer-feedback')).not.toBeInTheDocument();
+      expect(within(cancelledBubble).queryByRole('button', { name: '답변 복사' })).not.toBeInTheDocument();
+      expect(within(cancelledBubble).getByRole('button', { name: '다시 질문' })).toBeInTheDocument();
+      expect(within(cancelledBubble).getByRole('button', { name: '질문 복원' })).toBeInTheDocument();
+    });
   });
 });
