@@ -187,6 +187,33 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(result).toEqual(mockDetail);
   });
 
+  it('getSessionDetail should return turns with isCancelled field when session has cancelled turn', async () => {
+    const mockDetailWithCancelled = {
+      sessionId: 's-cancelled',
+      title: '중단된 대화',
+      turns: [
+        {
+          role: 'user' as const,
+          content: '질문',
+          createdAt: '2026-10-29T00:00:00Z',
+        },
+        {
+          role: 'assistant' as const,
+          content: '답변 생성이 중단되었습니다.',
+          createdAt: '2026-10-29T00:00:01Z',
+          isCancelled: true,
+        },
+      ],
+      createdAt: '2026-10-29T00:00:00Z',
+      updatedAt: '2026-10-29T00:00:01Z',
+    };
+    mockAxios.get.mockResolvedValueOnce({ data: mockDetailWithCancelled });
+
+    const result = await getSessionDetail('s-cancelled');
+    expect(mockAxios.get).toHaveBeenCalledWith('/ai/rag/sessions/s-cancelled');
+    expect(result?.turns[1].isCancelled).toBe(true);
+  });
+
   it('deleteSessionById should delete a session via gateway', async () => {
     mockAxios.delete.mockResolvedValueOnce({ data: undefined });
 
