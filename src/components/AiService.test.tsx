@@ -7050,4 +7050,275 @@ describe('AiService Component', () => {
       expect(screen.getByText('청크 #2')).toBeInTheDocument();
     });
   });
+
+  describe('SPEC-085: 대화 세션 복원 시 답변 중단 상태(isCancelled) 영속화 및 미완성 답변 복원', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 스트리밍 도중 취소된 턴(isCancelled: true)이 있는 세션 When handleLoadSession으로 세션을 복원하면 Then [생성 중단됨] 배지가 렌더링되고 AnswerFeedback 폼이 표시되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-cancelled-1',
+        title: '중단된 대화 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '환불 규정 알려줘',
+            createdAt: '2026-10-29T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '환불 규정은 결제 후 7일 이내에 신청 가',
+            createdAt: '2026-10-29T00:00:01Z',
+            isCancelled: true,
+          },
+        ],
+        createdAt: '2026-10-29T00:00:00Z',
+        updatedAt: '2026-10-29T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-cancelled-1',
+          title: '중단된 대화 세션',
+          updatedAt: '2026-10-29T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('중단된 대화 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // [생성 중단됨] 배지 노출 확인
+      const cancelledBadge = screen.getByTestId('cancelled-badge');
+      expect(cancelledBadge).toBeInTheDocument();
+      expect(cancelledBadge).toHaveTextContent('[생성 중단됨]');
+
+      // 메시지 컨테이너 클래스 확인
+      const cancelledMessage = cancelledBadge.closest('.chat-message') as HTMLElement;
+      expect(cancelledMessage).toHaveClass('cancelled');
+      expect(within(cancelledMessage).getByText('환불 규정은 결제 후 7일 이내에 신청 가')).toBeInTheDocument();
+
+      // 중단 조작 버튼(다시 질문, 질문 복원) 존재 확인
+      expect(within(cancelledMessage).getByRole('button', { name: '다시 질문' })).toBeInTheDocument();
+      expect(within(cancelledMessage).getByRole('button', { name: '질문 복원' })).toBeInTheDocument();
+
+      // AnswerFeedback 폼 및 복사/보관 버튼 미노출 확인
+      expect(within(cancelledMessage).queryByRole('button', { name: '답변 복사' })).not.toBeInTheDocument();
+      expect(within(cancelledMessage).queryByRole('button', { name: '답변 보관' })).not.toBeInTheDocument();
+      expect(within(cancelledMessage).queryByText('이 답변이 도움이 되었나요?')).not.toBeInTheDocument();
+    });
+
+    it('Given 첫 토큰 수신 전 즉시 중단된 세션 When 세션을 복원하면 Then "답변 생성이 중단되었습니다." 텍스트와 [생성 중단됨] 배지가 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-cancelled-immediate',
+        title: '즉시 중단된 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '즉시 중단할 질문',
+            createdAt: '2026-10-29T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '답변 생성이 중단되었습니다.',
+            createdAt: '2026-10-29T00:00:01Z',
+            isCancelled: true,
+          },
+        ],
+        createdAt: '2026-10-29T00:00:00Z',
+        updatedAt: '2026-10-29T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-cancelled-immediate',
+          title: '즉시 중단된 세션',
+          updatedAt: '2026-10-29T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('즉시 중단된 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      const cancelledBadge = screen.getByTestId('cancelled-badge');
+      expect(cancelledBadge).toHaveTextContent('[생성 중단됨]');
+      const cancelledMessage = cancelledBadge.closest('.chat-message') as HTMLElement;
+      expect(cancelledMessage).toHaveClass('cancelled');
+      expect(within(cancelledMessage).getByText('답변 생성이 중단되었습니다.')).toBeInTheDocument();
+      expect(within(cancelledMessage).queryByText('이 답변이 도움이 되었나요?')).not.toBeInTheDocument();
+    });
+
+    it('Given 정상 완료된 세션 또는 레거시 세션(isCancelled: false 또는 undefined) When 세션을 복원하면 Then [생성 중단됨] 배지가 없고 정상 기능들이 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-normal-1',
+        title: '정상 완료 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '정상 질문',
+            createdAt: '2026-10-29T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '정상 답변 완료',
+            createdAt: '2026-10-29T00:00:01Z',
+            confidence: 0.95,
+          },
+        ],
+        createdAt: '2026-10-29T00:00:00Z',
+        updatedAt: '2026-10-29T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-normal-1',
+          title: '정상 완료 세션',
+          updatedAt: '2026-10-29T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('정상 완료 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.queryByTestId('cancelled-badge')).not.toBeInTheDocument();
+      expect(screen.queryByText('[생성 중단됨]')).not.toBeInTheDocument();
+      expect(screen.getAllByText('정상 답변 완료')[0]).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '답변 복사' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '답변 보관' })).toBeInTheDocument();
+      expect(screen.getByTestId('answer-feedback')).toBeInTheDocument();
+    });
+
+    it('Given 정상 완료된 턴과 중단된 턴이 공존하는 멀티턴 세션 When 세션을 복원하면 Then 각 턴의 상태에 맞게 정상 UI와 중단 UI가 각각 올바르게 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSessionDetail = {
+        sessionId: 'sess-mixed-1',
+        title: '멀티턴 혼합 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '첫 번째 정상 질문',
+            createdAt: '2026-10-29T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '첫 번째 정상 답변입니다.',
+            createdAt: '2026-10-29T00:00:01Z',
+            confidence: 0.9,
+            isCancelled: false,
+          },
+          {
+            role: 'user' as const,
+            content: '두 번째 중단될 질문',
+            createdAt: '2026-10-29T00:00:02Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '두 번째 생성 도중 중단된 답변',
+            createdAt: '2026-10-29T00:00:03Z',
+            isCancelled: true,
+          },
+        ],
+        createdAt: '2026-10-29T00:00:00Z',
+        updatedAt: '2026-10-29T00:00:03Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-mixed-1',
+          title: '멀티턴 혼합 세션',
+          updatedAt: '2026-10-29T00:00:03Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('멀티턴 혼합 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      // 1턴 어시스턴트 메시지 검증 (정상)
+      const normalAnswer = screen.getByText('첫 번째 정상 답변입니다.');
+      const normalBubble = normalAnswer.closest('.chat-message') as HTMLElement;
+      expect(normalBubble).not.toHaveClass('cancelled');
+      expect(within(normalBubble).getByRole('button', { name: '답변 복사' })).toBeInTheDocument();
+      expect(within(normalBubble).getByRole('button', { name: '답변 보관' })).toBeInTheDocument();
+      expect(within(normalBubble).getByTestId('answer-feedback')).toBeInTheDocument();
+
+      // 2턴 어시스턴트 메시지 검증 (중단)
+      const cancelledBadge = screen.getByTestId('cancelled-badge');
+      expect(cancelledBadge).toBeInTheDocument();
+      const cancelledBubble = cancelledBadge.closest('.chat-message') as HTMLElement;
+      expect(cancelledBubble).toHaveClass('cancelled');
+      expect(within(cancelledBubble).getByText('두 번째 생성 도중 중단된 답변')).toBeInTheDocument();
+      expect(within(cancelledBubble).queryByTestId('answer-feedback')).not.toBeInTheDocument();
+      expect(within(cancelledBubble).queryByRole('button', { name: '답변 복사' })).not.toBeInTheDocument();
+      expect(within(cancelledBubble).getByRole('button', { name: '다시 질문' })).toBeInTheDocument();
+      expect(within(cancelledBubble).getByRole('button', { name: '질문 복원' })).toBeInTheDocument();
+    });
+  });
 });

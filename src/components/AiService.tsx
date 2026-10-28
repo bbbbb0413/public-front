@@ -350,6 +350,7 @@ export const AiService = () => {
         missing: t.missing,
         iterations: t.iterations,
         sources: t.sources,
+        isCancelled: t.isCancelled ?? false,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);

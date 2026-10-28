@@ -303,6 +303,7 @@ export interface SessionTurn {
   confidence?: number;
   missing?: string[];
   iterations?: number;
+  isCancelled?: boolean;
 }
 
 export interface SessionDetailOut {
