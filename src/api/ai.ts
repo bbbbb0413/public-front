@@ -204,6 +204,11 @@ export const subscribeIngestJob = (
   return close;
 };
 
+export const retryDocument = async (documentId: string): Promise<DocumentItem> => {
+  const response = await client.post<DocumentItem>(`/ai/knowledge/documents/${documentId}/retry`);
+  return response.data;
+};
+
 export const deleteDocument = async (id: string) => {
   const response = await client.delete(`/ai/knowledge/documents/${id}`);
   return response.data;

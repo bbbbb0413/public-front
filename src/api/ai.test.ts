@@ -18,6 +18,7 @@ vi.mock('axios', () => ({
 import {
   getDocuments,
   uploadDocument,
+  retryDocument,
   deleteDocument,
   askQuestionStream,
   getSessions,
@@ -79,6 +80,21 @@ describe('AI Service API (Gateway 경유)', () => {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     expect(result).toEqual(mockResponse);
+  });
+
+  it('retryDocument should call retry endpoint via gateway with documentId', async () => {
+    const mockDoc = {
+      id: 'doc-retry-1',
+      fileName: 'retry-doc.pdf',
+      status: 'processed',
+      chunkCount: 3,
+      createdAt: '2026-10-31T00:00:00.000Z',
+    };
+    mockAxios.post.mockResolvedValueOnce({ data: mockDoc });
+
+    const result = await retryDocument('doc-retry-1');
+    expect(mockAxios.post).toHaveBeenCalledWith('/ai/knowledge/documents/doc-retry-1/retry');
+    expect(result).toEqual(mockDoc);
   });
 
   it('deleteDocument should delete a document by id via gateway', async () => {
