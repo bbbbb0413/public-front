@@ -6,6 +6,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import {
   getDocuments,
   uploadDocument,
+  retryDocument,
   deleteDocument,
   askQuestionStream,
   getSessions,
@@ -116,6 +117,7 @@ export const AiService = () => {
   const [deletingDoc, setDeletingDoc] = useState<{ id: string; fileName: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
+  const [retryingDocId, setRetryingDocId] = useState<string | null>(null);
 
   const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
@@ -518,8 +520,20 @@ export const AiService = () => {
     }
   };
 
-  const handleRetryUpload = () => {
-    fileInputRef.current?.click();
+  const handleRetryDocument = async (doc: DocumentInfo) => {
+    if (retryingDocId) return;
+    setRetryingDocId(doc.id);
+    setErrorMsg('');
+    try {
+      await retryDocument(doc.id);
+      await fetchDocuments();
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: unknown } } };
+      const serverMessage = err.response?.data?.message;
+      setErrorMsg(typeof serverMessage === 'string' ? serverMessage : '문서 재처리에 실패했습니다.');
+    } finally {
+      setRetryingDocId(null);
+    }
   };
 
   useEffect(() => {
@@ -974,7 +988,15 @@ export const AiService = () => {
                           <td>
                             <div className="doc-actions">
                               {isFailed && (
-                                <button onClick={handleRetryUpload} className="btn-retry" title="다시 업로드">재시도</button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryDocument(doc)}
+                                  className="btn-retry"
+                                  disabled={retryingDocId === doc.id}
+                                  title={retryingDocId === doc.id ? '재시도 중...' : '재시도'}
+                                >
+                                  {retryingDocId === doc.id ? '재시도 중...' : '재시도'}
+                                </button>
                               )}
                               {isCompleted && (
                                 <>

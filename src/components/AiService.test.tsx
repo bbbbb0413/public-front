@@ -9,6 +9,7 @@ vi.mock('../api/ai', () => {
   return {
     getDocuments: vi.fn(),
     uploadDocument: vi.fn(),
+    retryDocument: vi.fn(),
     deleteDocument: vi.fn(),
     askQuestionStream: vi.fn(),
     getSessions: vi.fn().mockResolvedValue([]),
@@ -3161,7 +3162,7 @@ describe('AiService Component', () => {
       expect(screen.getByText('임베딩 생성 중 65%')).toBeInTheDocument();
     });
 
-    it('Given 문서 상태가 failed일 때 When 문서 목록이 렌더링되면 Then 재시도 버튼이 노출되고 클릭 시 파일 업로드 창이 트리거된다', async () => {
+    it('Given 문서 상태가 failed일 때 When 재시도 버튼을 클릭하면 Then 파일 업로드 창 대신 retryDocument(doc.id)가 호출된다', async () => {
       const mockDocs = [
         {
           id: 'doc-fail-1',
@@ -3172,6 +3173,13 @@ describe('AiService Component', () => {
         },
       ];
       vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+      vi.mocked(aiApi.retryDocument).mockResolvedValueOnce({
+        id: 'doc-fail-1',
+        fileName: 'error-doc.pdf',
+        status: 'processed',
+        chunkCount: 5,
+        createdAt: '2026-09-02T00:00:00.000Z',
+      });
 
       await act(async () => {
         render(<AiService />);
@@ -3187,7 +3195,252 @@ describe('AiService Component', () => {
         fireEvent.click(retryBtn);
       });
 
-      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(clickSpy).not.toHaveBeenCalled();
+      expect(aiApi.retryDocument).toHaveBeenCalledWith('doc-fail-1');
+    });
+
+    it('Given 재시도 요청이 진행 중일 때 When 해당 행의 상태를 확인하면 Then 버튼 텍스트가 "재시도 중..."으로 변경되고 disabled 상태가 된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveRetry: (value: aiApi.DocumentItem) => void = () => {};
+      const retryPromise = new Promise<aiApi.DocumentItem>((resolve) => {
+        resolveRetry = resolve;
+      });
+      vi.mocked(aiApi.retryDocument).mockReturnValueOnce(retryPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByRole('button', { name: '재시도 중...' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '재시도 중...' })).toBeDisabled();
+
+      await act(async () => {
+        resolveRetry({
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'processed',
+          chunkCount: 5,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        });
+      });
+
+      expect(screen.queryByRole('button', { name: '재시도 중...' })).not.toBeInTheDocument();
+    });
+
+    it('Given 여러 실패 문서가 목록에 존재할 때 When 특정 문서 재시도를 클릭하면 Then 해당 문서의 버튼만 "재시도 중..." 및 disabled가 되고 다른 문서는 영향을 받지 않는다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc-1.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+        {
+          id: 'doc-fail-2',
+          fileName: 'error-doc-2.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+
+      let resolveRetry: (value: aiApi.DocumentItem) => void = () => {};
+      const retryPromise = new Promise<aiApi.DocumentItem>((resolve) => {
+        resolveRetry = resolve;
+      });
+      vi.mocked(aiApi.retryDocument).mockReturnValueOnce(retryPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const buttons = screen.getAllByRole('button', { name: '재시도' });
+      expect(buttons).toHaveLength(2);
+
+      await act(async () => {
+        fireEvent.click(buttons[0]);
+      });
+
+      const retryingBtn = screen.getByRole('button', { name: '재시도 중...' });
+      const normalRetryBtn = screen.getByRole('button', { name: '재시도' });
+
+      expect(retryingBtn).toBeDisabled();
+      expect(normalRetryBtn).not.toBeDisabled();
+
+      // 다른 재시도 버튼을 클릭해도 retryingDocId가 존재하므로 두 번째 retryDocument는 호출되지 않음
+      await act(async () => {
+        fireEvent.click(normalRetryBtn);
+      });
+      expect(aiApi.retryDocument).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveRetry({
+          id: 'doc-fail-1',
+          fileName: 'error-doc-1.pdf',
+          status: 'processed',
+          chunkCount: 5,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        });
+      });
+    });
+
+    it('Given 재시도가 성공하면 최신 문서 목록(fetchDocuments)이 갱신되어 완료 배지와 청크 수가 노출되고 에러 배너가 초기화된다', async () => {
+      const initialDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      const updatedDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'processed',
+          chunkCount: 8,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getDocuments)
+        .mockResolvedValueOnce(initialDocs)
+        .mockResolvedValueOnce(updatedDocs);
+
+      vi.mocked(aiApi.retryDocument).mockResolvedValueOnce(updatedDocs[0]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(aiApi.retryDocument).toHaveBeenCalledWith('doc-fail-1');
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(2);
+
+      expect(screen.getByText('8')).toBeInTheDocument();
+      expect(screen.getByText('processed')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '재시도' })).not.toBeInTheDocument();
+    });
+
+    it('Given 재시도 요청이 성공했으나 목록 갱신이 실패할 때 When 재시도가 완료되면 Then 에러 배너에 "문서 목록을 불러오는 데 실패했습니다." 메시지가 유지된다', async () => {
+      const initialDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'failed-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getDocuments)
+        .mockResolvedValueOnce(initialDocs)
+        .mockRejectedValueOnce(new Error('Fetch failed'));
+
+      vi.mocked(aiApi.retryDocument).mockResolvedValueOnce({
+        id: 'doc-fail-1',
+        fileName: 'failed-doc.pdf',
+        status: 'processed',
+        chunkCount: 8,
+        createdAt: '2026-09-02T00:00:00.000Z',
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(aiApi.retryDocument).toHaveBeenCalledWith('doc-fail-1');
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('문서 목록을 불러오는 데 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('Given 재시도 요청이 실패하면 상단 에러 배너에 오류 메시지가 노출되고 버튼이 다시 활성화된 [재시도] 상태로 복귀한다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'error-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.retryDocument).mockRejectedValueOnce({
+        response: {
+          data: {
+            message: '원본 파일이 손실되어 재시도할 수 없습니다.',
+          },
+        },
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByText('원본 파일이 손실되어 재시도할 수 없습니다.')).toBeInTheDocument();
+      const restoredRetryBtn = screen.getByRole('button', { name: '재시도' });
+      expect(restoredRetryBtn).toBeInTheDocument();
+      expect(restoredRetryBtn).not.toBeDisabled();
+    });
+
+    it('Given 재시도 요청이 서버 메시지 없이 실패(네트워크 오류 등)할 때 When 재시도를 실행하면 Then 기본 문구 "문서 재처리에 실패했습니다."가 에러 배너에 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-generic',
+          fileName: 'generic-error.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.retryDocument).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByText('문서 재처리에 실패했습니다.')).toBeInTheDocument();
+      const restoredRetryBtn = screen.getByRole('button', { name: '재시도' });
+      expect(restoredRetryBtn).toBeInTheDocument();
+      expect(restoredRetryBtn).not.toBeDisabled();
     });
 
     it('Given 업로드 진행 중 SSE progress 이벤트가 수신될 때 When 진행률이 수신되면 Then 업로드 버튼 텍스트가 단계명 및 진행률로 갱신된다', async () => {

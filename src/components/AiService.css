@@ -394,9 +394,14 @@
   transition: all 0.2s;
 }
 
-.btn-retry:hover {
+.btn-retry:hover:not(:disabled) {
   background: hsla(210, 80%, 50%, 0.25);
   border-color: hsl(210, 90%, 70%);
+}
+
+.btn-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-chunk-count {
