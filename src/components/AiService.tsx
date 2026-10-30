@@ -523,10 +523,10 @@ export const AiService = () => {
   const handleRetryDocument = async (doc: DocumentInfo) => {
     if (retryingDocId) return;
     setRetryingDocId(doc.id);
+    setErrorMsg('');
     try {
       await retryDocument(doc.id);
       await fetchDocuments();
-      setErrorMsg('');
     } catch (error) {
       const err = error as { response?: { data?: { message?: unknown } } };
       const serverMessage = err.response?.data?.message;

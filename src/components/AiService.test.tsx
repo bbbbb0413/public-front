@@ -3344,6 +3344,43 @@ describe('AiService Component', () => {
       expect(screen.queryByRole('button', { name: '재시도' })).not.toBeInTheDocument();
     });
 
+    it('Given 재시도 요청이 성공했으나 목록 갱신이 실패할 때 When 재시도가 완료되면 Then 에러 배너에 "문서 목록을 불러오는 데 실패했습니다." 메시지가 유지된다', async () => {
+      const initialDocs = [
+        {
+          id: 'doc-fail-1',
+          fileName: 'failed-doc.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getDocuments)
+        .mockResolvedValueOnce(initialDocs)
+        .mockRejectedValueOnce(new Error('Fetch failed'));
+
+      vi.mocked(aiApi.retryDocument).mockResolvedValueOnce({
+        id: 'doc-fail-1',
+        fileName: 'failed-doc.pdf',
+        status: 'processed',
+        chunkCount: 8,
+        createdAt: '2026-09-02T00:00:00.000Z',
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(aiApi.retryDocument).toHaveBeenCalledWith('doc-fail-1');
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('문서 목록을 불러오는 데 실패했습니다.')).toBeInTheDocument();
+    });
+
     it('Given 재시도 요청이 실패하면 상단 에러 배너에 오류 메시지가 노출되고 버튼이 다시 활성화된 [재시도] 상태로 복귀한다', async () => {
       const mockDocs = [
         {
