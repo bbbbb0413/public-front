@@ -3378,6 +3378,34 @@ describe('AiService Component', () => {
       expect(restoredRetryBtn).not.toBeDisabled();
     });
 
+    it('Given 재시도 요청이 서버 메시지 없이 실패(네트워크 오류 등)할 때 When 재시도를 실행하면 Then 기본 문구 "문서 재처리에 실패했습니다."가 에러 배너에 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-fail-generic',
+          fileName: 'generic-error.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.retryDocument).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByText('문서 재처리에 실패했습니다.')).toBeInTheDocument();
+      const restoredRetryBtn = screen.getByRole('button', { name: '재시도' });
+      expect(restoredRetryBtn).toBeInTheDocument();
+      expect(restoredRetryBtn).not.toBeDisabled();
+    });
+
     it('Given 업로드 진행 중 SSE progress 이벤트가 수신될 때 When 진행률이 수신되면 Then 업로드 버튼 텍스트가 단계명 및 진행률로 갱신된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.uploadDocument).mockResolvedValueOnce({ jobId: 'job-step-progress' });
