@@ -1306,6 +1306,12 @@
   color: hsl(210, 20%, 88%);
 }
 
+.progress-next-query {
+  color: #c4b5fd;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
 .message-meta-badges {
   display: flex;
   align-items: center;
@@ -1324,6 +1330,34 @@
   font-size: 0.75rem;
   font-weight: 600;
   color: #a5b4fc;
+}
+
+.refined-queries-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.refined-queries-label {
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 500;
+}
+
+.refined-queries-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.refined-query-tag {
+  color: #c4b5fd;
+  font-weight: 500;
 }
 
 .confidence-badge {

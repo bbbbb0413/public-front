@@ -854,6 +854,62 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('askQuestionStream should pass nextQuery in onProgress and refinedQueries in onDone (SPEC-088)', async () => {
+    const onMessage = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    const onProgress = vi.fn();
+
+    mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-refined-queries' } });
+
+    const mockChunks = [
+      'id: 1\ndata: {"type":"progress","data":{"iteration":2,"phase":"refining","nextQuery":"보완 검색어 키워드"}}\n\n',
+      'id: 2\ndata: {"type":"token","data":"보완 답변입니다."}\n\n',
+      'id: 3\ndata: {"type":"done","data":{"confidence":0.92,"iterations":2,"refinedQueries":["보완 검색어 키워드"]}}\n\n',
+    ];
+
+    const stream = new ReadableStream({
+      start(controller) {
+        mockChunks.forEach((chunk) => {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        });
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+    );
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+    await askQuestionStream(
+      '에이전틱 질의',
+      onMessage,
+      onDone,
+      onError,
+      null,
+      undefined,
+      undefined,
+      null,
+      undefined,
+      onProgress,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(onProgress).toHaveBeenCalledWith({
+      iteration: 2,
+      phase: 'refining',
+      nextQuery: '보완 검색어 키워드',
+    });
+    expect(onMessage).toHaveBeenCalledWith('보완 답변입니다.');
+    expect(onDone).toHaveBeenCalledWith({
+      confidence: 0.92,
+      iterations: 2,
+      refinedQueries: ['보완 검색어 키워드'],
+    });
+  });
+
   describe('Personal Prompt Management API (SPEC-026)', () => {
     it('getMyPromptList should fetch prompt list via GET /ai/my-prompt/list', async () => {
       const mockList = [

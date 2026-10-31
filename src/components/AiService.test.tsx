@@ -7574,4 +7574,220 @@ describe('AiService Component', () => {
       expect(within(cancelledBubble).getByRole('button', { name: '질문 복원' })).toBeInTheDocument();
     });
   });
+
+  describe('SPEC-088: 에이전틱 RAG 정제 쿼리(refinedQueries / nextQuery) 추적 및 표시', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 스트리밍 중 nextQuery를 포함한 progress 이벤트가 발생할 때 When 화면을 확인하면 Then 스트리밍 진행 인디케이터에 정제 검색어가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      let triggerRefiningWithNextQuery: () => void;
+      let triggerSearchingWithoutNextQuery: () => void;
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onProgress = args[9] as ((progress: aiApi.AgentProgress) => void) | undefined;
+        triggerSearchingWithoutNextQuery = () => {
+          onProgress?.({
+            iteration: 1,
+            phase: 'searching',
+          });
+        };
+        triggerRefiningWithNextQuery = () => {
+          onProgress?.({
+            iteration: 1,
+            phase: 'refining',
+            nextQuery: '2026년 결제 정책 변경사항',
+          });
+        };
+        return Object.assign(Promise.resolve(), { cancel: vi.fn() });
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '결제 정책 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 1회차 searching (nextQuery 없음)
+      await act(async () => {
+        triggerSearchingWithoutNextQuery();
+      });
+      expect(screen.getByTestId('agent-progress')).toBeInTheDocument();
+      expect(screen.queryByTestId('progress-next-query')).not.toBeInTheDocument();
+
+      // 1회차 refining (nextQuery 있음)
+      await act(async () => {
+        triggerRefiningWithNextQuery();
+      });
+      expect(screen.getByTestId('agent-progress')).toBeInTheDocument();
+      const nextQueryEl = screen.getByTestId('progress-next-query');
+      expect(nextQueryEl).toBeInTheDocument();
+      expect(nextQueryEl).toHaveTextContent('[보완 검색: "2026년 결제 정책 변경사항"]');
+    });
+
+    it('Given 2회 이상 반복 검증을 거친 에이전틱 답변 완료 시 When done 이벤트에 refinedQueries가 포함되면 Then AI 메시지 버블에 보완 검색어 배지와 쿼리 목록이 정상 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone) => {
+          onMessage('최종 보완된 에이전틱 답변입니다.');
+          onDone({
+            confidence: 0.95,
+            iterations: 2,
+            refinedQueries: ['추가 검색어 1', '추가 검색어 2'],
+          });
+          return Object.assign(Promise.resolve(), { cancel: vi.fn() });
+        },
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '다회차 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.getAllByText('최종 보완된 에이전틱 답변입니다.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId('iteration-badge')).toHaveTextContent('[2회 반복 검증]');
+
+      // refined-queries-badge 검증
+      const refinedBadge = screen.getByTestId('refined-queries-badge');
+      expect(refinedBadge).toBeInTheDocument();
+      expect(screen.getByText('보완 검색어:')).toBeInTheDocument();
+      expect(screen.getByText('"추가 검색어 1"')).toBeInTheDocument();
+      expect(screen.getByText('"추가 검색어 2"')).toBeInTheDocument();
+    });
+
+    it('Given refinedQueries가 없거나 빈 배열인 경우 When 답변이 완료되면 Then 보완 검색어 배지가 화면에 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone) => {
+          onMessage('단발성 답변입니다.');
+          onDone({
+            confidence: 0.88,
+            iterations: 1,
+            refinedQueries: [],
+          });
+          return Object.assign(Promise.resolve(), { cancel: vi.fn() });
+        },
+      );
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '단발 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(screen.getAllByText('단발성 답변입니다.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByTestId('refined-queries-badge')).not.toBeInTheDocument();
+    });
+
+    it('Given 세션에 refinedQueries가 저장되어 있는 경우 When 세션을 복원하면 Then 복원된 AI 메시지 버블에 보완 검색어 목록이 표시된다', async () => {
+      const mockSessionDetail = {
+        sessionId: 'sess-refined-1',
+        title: '정제 쿼리 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '환불 규정 상세',
+            createdAt: '2026-11-01T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '환불 규정 안내 내용입니다.',
+            createdAt: '2026-11-01T00:00:01Z',
+            confidence: 0.9,
+            iterations: 2,
+            refinedQueries: ['환불 예외 조항', '부분 환불 규정'],
+          },
+        ],
+        createdAt: '2026-11-01T00:00:00Z',
+        updatedAt: '2026-11-01T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-refined-1',
+          title: '정제 쿼리 세션',
+          updatedAt: '2026-11-01T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('정제 쿼리 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getAllByText('환불 규정 안내 내용입니다.').length).toBeGreaterThanOrEqual(1);
+      const refinedBadge = screen.getByTestId('refined-queries-badge');
+      expect(refinedBadge).toBeInTheDocument();
+      expect(within(refinedBadge).getByText('"환불 예외 조항"')).toBeInTheDocument();
+      expect(within(refinedBadge).getByText('"부분 환불 규정"')).toBeInTheDocument();
+    });
+  });
 });

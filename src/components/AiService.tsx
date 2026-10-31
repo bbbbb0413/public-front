@@ -56,6 +56,7 @@ interface ChatMessage {
   isError?: boolean;
   errorMessage?: string;
   isCancelled?: boolean;
+  refinedQueries?: string[];
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -353,6 +354,7 @@ export const AiService = () => {
         iterations: t.iterations,
         sources: t.sources,
         isCancelled: t.isCancelled ?? false,
+        refinedQueries: t.refinedQueries,
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
@@ -697,6 +699,7 @@ export const AiService = () => {
             missing,
             iterations,
             sources: receivedSources,
+            refinedQueries: finalMeta?.refinedQueries,
           },
         ]);
         setStreamingAnswer('');
@@ -1412,7 +1415,7 @@ export const AiService = () => {
                           >
                             {msg.text}
                           </ReactMarkdown>
-                          {(msg.iterations !== undefined && msg.iterations > 1 || msg.confidence !== undefined) && (
+                          {((msg.iterations !== undefined && msg.iterations > 1) || msg.confidence !== undefined || (msg.refinedQueries && msg.refinedQueries.length > 0)) && (
                             <div className="message-meta-badges">
                               {msg.iterations !== undefined && msg.iterations > 1 && (
                                 <div
@@ -1420,6 +1423,18 @@ export const AiService = () => {
                                   data-testid="iteration-badge"
                                 >
                                   [{msg.iterations}회 반복 검증]
+                                </div>
+                              )}
+                              {msg.refinedQueries && msg.refinedQueries.length > 0 && (
+                                <div className="refined-queries-badge" data-testid="refined-queries-badge">
+                                  <span className="refined-queries-label">보완 검색어:</span>
+                                  <div className="refined-queries-tags">
+                                    {msg.refinedQueries.map((query, qIdx) => (
+                                      <span key={qIdx} className="refined-query-tag" data-testid="refined-query-tag">
+                                        "{query}"
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
                               )}
                               {msg.confidence !== undefined && (() => {
@@ -1586,6 +1601,11 @@ export const AiService = () => {
                           <span className="progress-phase">
                             {PHASE_LABELS[currentProgress.phase] || currentProgress.phase}
                           </span>
+                          {currentProgress.nextQuery && (
+                            <span className="progress-next-query" data-testid="progress-next-query">
+                              [보완 검색: "{currentProgress.nextQuery}"]
+                            </span>
+                          )}
                         </div>
                       )}
                       {streamingAnswer ? (
