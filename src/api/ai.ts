@@ -274,6 +274,7 @@ export interface AgentProgress {
   phase: AgentPhase;
   confidence?: number;
   missing?: string[];
+  nextQuery?: string;
 }
 
 export interface SessionOut {
@@ -309,6 +310,7 @@ export interface SessionTurn {
   missing?: string[];
   iterations?: number;
   isCancelled?: boolean;
+  refinedQueries?: string[];
 }
 
 export interface SessionDetailOut {
@@ -455,6 +457,7 @@ export interface AskDoneMeta {
   confidence?: number;
   missing?: string[];
   iterations?: number;
+  refinedQueries?: string[];
 }
 
 export const askQuestionStream = (
