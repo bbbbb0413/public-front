@@ -7789,5 +7789,58 @@ describe('AiService Component', () => {
       expect(within(refinedBadge).getByText('"환불 예외 조항"')).toBeInTheDocument();
       expect(within(refinedBadge).getByText('"부분 환불 규정"')).toBeInTheDocument();
     });
+
+    it('Given refinedQueries가 없는 레거시 세션을 복원할 때 When 세션 상세를 조회하면 Then 보완 검색어 배지가 렌더링되지 않는다', async () => {
+      const mockSessionDetail = {
+        sessionId: 'sess-legacy-1',
+        title: '일반 레거시 세션',
+        turns: [
+          {
+            role: 'user' as const,
+            content: '일반 질문',
+            createdAt: '2026-11-01T00:00:00Z',
+          },
+          {
+            role: 'assistant' as const,
+            content: '일반 답변 내용입니다.',
+            createdAt: '2026-11-01T00:00:01Z',
+            confidence: 0.85,
+            iterations: 1,
+            // refinedQueries 필드 없음 (undefined 또는 [])
+          },
+        ],
+        createdAt: '2026-11-01T00:00:00Z',
+        updatedAt: '2026-11-01T00:00:01Z',
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce(mockSessionDetail);
+      vi.mocked(aiApi.getSessions).mockResolvedValueOnce([
+        {
+          sessionId: 'sess-legacy-1',
+          title: '일반 레거시 세션',
+          updatedAt: '2026-11-01T00:00:01Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const sessionItem = await screen.findByText('일반 레거시 세션');
+      await act(async () => {
+        fireEvent.click(sessionItem);
+      });
+
+      expect(screen.getAllByText('일반 답변 내용입니다.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByTestId('refined-queries-badge')).not.toBeInTheDocument();
+    });
   });
 });
