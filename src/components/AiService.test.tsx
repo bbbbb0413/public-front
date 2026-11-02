@@ -8151,5 +8151,107 @@ describe('AiService Component', () => {
       expect(noteElement).toHaveClass('session-item-note');
       expect(noteElement).toHaveAttribute('title', '전체 메모 내용입니다. 툴팁으로 확인 가능해야 합니다.');
     });
+
+    it('QA: 답변 내용이 150자를 초과할 때 모달 미리보기에 150자 자름 및 말줄임표(...)가 표시된다', async () => {
+      const longContent = '가'.repeat(160);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-spec090',
+        title: '스펙90 긴 답변 세션',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+        turns: [
+          { role: 'user' as const, content: '긴 답변 질문', createdAt: '2026-11-03T00:00:00Z' },
+          { role: 'assistant' as const, content: longContent, createdAt: '2026-11-03T00:00:01Z' },
+        ],
+      });
+
+      await openChatAndSelectSession();
+
+      const answerBookmarkBtn = screen.getByRole('button', { name: /답변 보관/i });
+      await act(async () => {
+        fireEvent.click(answerBookmarkBtn);
+      });
+
+      const snippet = screen.getByTestId('bookmark-preview-snippet');
+      expect(snippet.textContent).toBe(`${'가'.repeat(150)}...`);
+    });
+
+    it('QA: 사이드바가 북마크 탭(sidebarTab === "bookmarks")인 상태에서 답변 보관 완료 시 getBookmarks를 호출하여 목록을 갱신한다', async () => {
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue([]);
+      vi.mocked(aiApi.createBookmark).mockResolvedValueOnce({
+        id: 'bm-spec090-refresh',
+        sessionId: 'sess-spec090',
+        turnIndex: 1,
+        note: '갱신 확인용',
+        createdAt: '2026-11-03T00:00:02Z',
+      });
+
+      await openChatAndSelectSession();
+
+      // 사이드바 탭을 보관함으로 전환
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+      expect(aiApi.getBookmarks).toHaveBeenCalledTimes(1);
+
+      // 세션 다시 선택하여 채팅 화면으로 진입하거나 기존 대화창 유지 상태에서 보관 모달 열기
+      const answerBookmarkBtn = screen.getByRole('button', { name: /답변 보관/i });
+      await act(async () => {
+        fireEvent.click(answerBookmarkBtn);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '보관하기' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 보관 완료 후 fetchBookmarks가 다시 호출되었는지 확인
+      expect(aiApi.getBookmarks).toHaveBeenCalledTimes(2);
+    });
+
+    it('QA: 보관 API 호출 중(isSavingBookmark)에는 Escape 키나 오버레이 클릭으로 모달이 닫히지 않는다', async () => {
+      let resolveBookmark: (val: aiApi.BookmarkItem) => void = () => {};
+      const pendingPromise = new Promise<aiApi.BookmarkItem>((resolve) => {
+        resolveBookmark = resolve;
+      });
+      vi.mocked(aiApi.createBookmark).mockReturnValueOnce(pendingPromise);
+
+      await openChatAndSelectSession();
+
+      const answerBookmarkBtn = screen.getByRole('button', { name: /답변 보관/i });
+      await act(async () => {
+        fireEvent.click(answerBookmarkBtn);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '보관하기' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // Escape 키 시도
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: /답변 보관/i })).toBeInTheDocument();
+
+      // 오버레이 클릭 시도
+      const overlay = screen.getByTestId('bookmark-note-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.getByRole('dialog', { name: /답변 보관/i })).toBeInTheDocument();
+
+      // 비동기 완료 후 모달 닫힘
+      await act(async () => {
+        resolveBookmark({
+          id: 'bm-async-2',
+          sessionId: 'sess-spec090',
+          turnIndex: 1,
+          createdAt: '2026-11-03T00:00:03Z',
+        });
+      });
+      expect(screen.queryByRole('dialog', { name: /답변 보관/i })).not.toBeInTheDocument();
+    });
   });
 });
