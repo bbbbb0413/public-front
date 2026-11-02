@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef, useContext, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -105,6 +105,9 @@ export const AiService = () => {
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [bookmarkSuccessMsg, setBookmarkSuccessMsg] = useState<string | null>(null);
   const bookmarkMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bookmarkModalTarget, setBookmarkModalTarget] = useState<{ turnIndex: number; text: string } | null>(null);
+  const [bookmarkNote, setBookmarkNote] = useState('');
+  const [isSavingBookmark, setIsSavingBookmark] = useState(false);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
@@ -212,20 +215,47 @@ export const AiService = () => {
     }
   };
 
-  const handleBookmarkAnswer = async (turnIndex: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!sessionId) return;
+  const handleBookmarkAnswer = (turnIndex: number, text: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setBookmarkModalTarget({ turnIndex, text });
+    setBookmarkNote('');
+  };
+
+  const handleBookmarkNoteChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    if (val.length <= 200) {
+      setBookmarkNote(val);
+    } else {
+      setBookmarkNote(val.slice(0, 200));
+    }
+  };
+
+  const handleCloseBookmarkModal = useCallback(() => {
+    if (isSavingBookmark) return;
+    setBookmarkModalTarget(null);
+    setBookmarkNote('');
+  }, [isSavingBookmark]);
+
+  const handleConfirmBookmarkAnswer = async () => {
+    if (!sessionId || !bookmarkModalTarget) return;
+    setIsSavingBookmark(true);
     try {
+      const trimmed = bookmarkNote.trim();
       await createBookmark({
         sessionId,
-        turnIndex,
+        turnIndex: bookmarkModalTarget.turnIndex,
+        note: trimmed || undefined,
       });
+      setBookmarkModalTarget(null);
+      setBookmarkNote('');
       showBookmarkToast('답변이 보관함에 저장되었습니다.');
       if (sidebarTab === 'bookmarks') {
         fetchBookmarks();
       }
     } catch {
       setErrorMsg('답변 보관에 실패했습니다.');
+    } finally {
+      setIsSavingBookmark(false);
     }
   };
 
@@ -612,6 +642,17 @@ export const AiService = () => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [viewingChunksDoc]);
+
+  useEffect(() => {
+    if (!bookmarkModalTarget) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSavingBookmark) {
+        handleCloseBookmarkModal();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [bookmarkModalTarget, isSavingBookmark, handleCloseBookmarkModal]);
 
   const handleDeleteClick = (doc: DocumentInfo) => {
     setDeletingDoc({ id: doc.id, fileName: doc.fileName });
@@ -1231,7 +1272,11 @@ export const AiService = () => {
                             {b.content && (
                               <span className="session-item-snippet">{b.content}</span>
                             )}
-                            {b.note && <span className="session-item-note">{b.note}</span>}
+                            {b.note && (
+                              <span className="session-item-note" title={b.note}>
+                                {b.note}
+                              </span>
+                            )}
                           </div>
                           <div className="session-item-actions">
                             <button
@@ -1559,7 +1604,7 @@ export const AiService = () => {
                               <button
                                 type="button"
                                 className="btn-bookmark-answer"
-                                onClick={(e) => handleBookmarkAnswer(idx, e)}
+                                onClick={(e) => handleBookmarkAnswer(idx, msg.text || '', e)}
                                 aria-label="답변 보관"
                               >
                                 ★ 보관
@@ -1913,6 +1958,87 @@ export const AiService = () => {
                 className="btn-close-chunks-footer"
               >
                 닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 답변 보관 메모 모달 (SPEC-090) */}
+      {bookmarkModalTarget && (
+        <div
+          className="modal-overlay chat-modal-overlay"
+          data-testid="bookmark-note-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isSavingBookmark) handleCloseBookmarkModal();
+          }}
+          role="presentation"
+        >
+          <div
+            className="bookmark-note-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bookmark-modal-title"
+          >
+            <div className="modal-header bookmark-modal-header">
+              <div className="bookmark-modal-title-row">
+                <h3 id="bookmark-modal-title" className="bookmark-modal-title">
+                  답변 보관
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseBookmarkModal}
+                disabled={isSavingBookmark}
+                className="btn-close-bookmark-modal"
+                aria-label="보관 모달 닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body bookmark-modal-body">
+              <div className="bookmark-preview-snippet" data-testid="bookmark-preview-snippet">
+                {(bookmarkModalTarget.text || '').length > 150
+                  ? `${(bookmarkModalTarget.text || '').slice(0, 150)}...`
+                  : bookmarkModalTarget.text || ''}
+              </div>
+              <div className="bookmark-note-field">
+                <label htmlFor="bookmark-note-input" className="bookmark-note-label">
+                  메모
+                </label>
+                <textarea
+                  id="bookmark-note-input"
+                  className="bookmark-note-textarea"
+                  value={bookmarkNote}
+                  onChange={handleBookmarkNoteChange}
+                  placeholder="보관 사유나 참고 메모를 입력하세요 (선택 사항)"
+                  maxLength={200}
+                  rows={4}
+                  disabled={isSavingBookmark}
+                />
+                <div className="bookmark-char-count" data-testid="bookmark-char-count">
+                  {bookmarkNote.length} / 200자
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer bookmark-modal-footer">
+              <button
+                type="button"
+                onClick={handleCloseBookmarkModal}
+                disabled={isSavingBookmark}
+                className="btn-cancel-bookmark"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBookmarkAnswer}
+                disabled={isSavingBookmark}
+                className="btn-confirm-bookmark"
+              >
+                {isSavingBookmark ? '저장 중...' : '보관하기'}
               </button>
             </div>
           </div>

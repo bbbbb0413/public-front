@@ -2311,3 +2311,181 @@
   background: #475569;
   color: #fff;
 }
+
+/* ── 답변 보관 메모 모달 (SPEC-090) ── */
+.bookmark-note-modal {
+  width: min(520px, 92vw);
+  background: hsl(222, 22%, 11%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 25px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: modalSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.bookmark-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.1rem 1.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+
+.bookmark-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.bookmark-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: hsl(210, 20%, 92%);
+}
+
+.btn-close-bookmark-modal {
+  background: none;
+  border: none;
+  color: hsl(210, 15%, 60%);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.btn-close-bookmark-modal:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.btn-close-bookmark-modal:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bookmark-modal-body {
+  padding: 1.25rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.bookmark-preview-snippet {
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid #3b82f6;
+  border-radius: 0 8px 8px 0;
+  padding: 0.85rem 1rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: hsl(210, 15%, 78%);
+  word-break: break-word;
+}
+
+.bookmark-note-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.bookmark-note-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: hsl(210, 15%, 70%);
+}
+
+.bookmark-note-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+  resize: vertical;
+  min-height: 85px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.bookmark-note-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.bookmark-note-textarea::placeholder {
+  color: hsl(210, 15%, 45%);
+}
+
+.bookmark-note-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bookmark-char-count {
+  text-align: right;
+  font-size: 0.78rem;
+  color: hsl(210, 15%, 55%);
+}
+
+.bookmark-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.9rem 1.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.btn-cancel-bookmark {
+  padding: 7px 16px;
+  background: #334155;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel-bookmark:hover:not(:disabled) {
+  background: #475569;
+  color: #fff;
+}
+
+.btn-cancel-bookmark:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-confirm-bookmark {
+  padding: 7px 18px;
+  background: #2563eb;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-confirm-bookmark:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.btn-confirm-bookmark:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
