@@ -8490,5 +8490,39 @@ describe('AiService Component', () => {
       expect(inlineBubble).toHaveTextContent('기수신된 유효 텍스트');
       expect(inlineBubble).toHaveTextContent('네트워크 연결이 끊어졌습니다.');
     });
+
+    it('Given onError 콜백에 string 원시 타입의 에러가 전달되었을 때 When 에러가 처리되면 Then 해당 문자열이 상단 배너와 인라인 버블에 정확히 표시된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.('임의의 문자열 예외 메시지');
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문자열 예외 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('임의의 문자열 예외 메시지');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('임의의 문자열 예외 메시지');
+    });
   });
 });

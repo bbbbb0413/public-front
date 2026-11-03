@@ -1014,6 +1014,39 @@ describe('AI Service API (Gateway 경유)', () => {
       );
     });
 
+    it('should extract plain text string when SSE error event data is a non-JSON string', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-err-plain' } });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode('id: 1\ndata: {"type":"error","data":"서버 내부 오류가 발생했습니다."}\n\n'),
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+      );
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '서버 내부 오류가 발생했습니다.',
+        }),
+      );
+    });
+
     it('should extract response.data.message when Axios POST /ai/rag/jobs fails', async () => {
       const onMessage = vi.fn();
       const onDone = vi.fn();
@@ -1064,6 +1097,28 @@ describe('AI Service API (Gateway 경유)', () => {
           message: '접근 권한이 없습니다.',
         }),
       );
+    });
+
+    it('should fallback to axios message when response.data has empty or whitespace message', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      const axiosError = {
+        isAxiosError: true,
+        response: {
+          status: 500,
+          data: {
+            message: '   ',
+          },
+        },
+        message: 'Request failed with status code 500',
+      };
+      mockAxios.post.mockRejectedValueOnce(axiosError);
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+
+      expect(onError).toHaveBeenCalledWith(axiosError);
     });
   });
 
