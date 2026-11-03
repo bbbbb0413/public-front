@@ -910,6 +910,218 @@ describe('AI Service API (Gateway 경유)', () => {
     });
   });
 
+  describe('askQuestionStream error detail extraction (SPEC-091)', () => {
+    it('should extract message from JSON string in SSE error event', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-err-json' } });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'id: 1\ndata: {"type":"error","data":"{\\"message\\":\\"요청이 보안 정책에 의해 차단되었습니다.\\"}"}\n\n',
+            ),
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+      );
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      await askQuestionStream('위험한 질문', onMessage, onDone, onError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '요청이 보안 정책에 의해 차단되었습니다.',
+        }),
+      );
+    });
+
+    it('should extract error field from JSON object in SSE error event', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-err-obj' } });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(
+              'id: 1\ndata: {"type":"error","data":{"error":"토큰 사용량이 초과되었습니다."}}\n\n',
+            ),
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+      );
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '토큰 사용량이 초과되었습니다.',
+        }),
+      );
+    });
+
+    it('should fallback to default error message when SSE error event data is empty', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-err-empty' } });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode('id: 1\ndata: {"type":"error","data":""}\n\n'),
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+      );
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '답변 수신 도중 에러가 발생했습니다.',
+        }),
+      );
+    });
+
+    it('should extract plain text string when SSE error event data is a non-JSON string', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      mockAxios.post.mockResolvedValueOnce({ data: { jobId: 'job-err-plain' } });
+
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode('id: 1\ndata: {"type":"error","data":"서버 내부 오류가 발생했습니다."}\n\n'),
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, body: stream, headers: new Headers() }),
+      );
+      vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue('jwt-token') });
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '서버 내부 오류가 발생했습니다.',
+        }),
+      );
+    });
+
+    it('should extract response.data.message when Axios POST /ai/rag/jobs fails', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      const axiosError = {
+        isAxiosError: true,
+        response: {
+          status: 400,
+          data: {
+            message: '질문 내용이 유효하지 않습니다.',
+          },
+        },
+        message: 'Request failed with status code 400',
+      };
+      mockAxios.post.mockRejectedValueOnce(axiosError);
+
+      await askQuestionStream('잘못된 질문', onMessage, onDone, onError);
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '질문 내용이 유효하지 않습니다.',
+        }),
+      );
+    });
+
+    it('should extract response.data.error when Axios POST /ai/rag/jobs fails with error field', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      const axiosError = {
+        isAxiosError: true,
+        response: {
+          status: 403,
+          data: {
+            error: '접근 권한이 없습니다.',
+          },
+        },
+        message: 'Request failed with status code 403',
+      };
+      mockAxios.post.mockRejectedValueOnce(axiosError);
+
+      await askQuestionStream('권한 없는 질문', onMessage, onDone, onError);
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '접근 권한이 없습니다.',
+        }),
+      );
+    });
+
+    it('should fallback to axios message when response.data has empty or whitespace message', async () => {
+      const onMessage = vi.fn();
+      const onDone = vi.fn();
+      const onError = vi.fn();
+
+      const axiosError = {
+        isAxiosError: true,
+        response: {
+          status: 500,
+          data: {
+            message: '   ',
+          },
+        },
+        message: 'Request failed with status code 500',
+      };
+      mockAxios.post.mockRejectedValueOnce(axiosError);
+
+      await askQuestionStream('질문', onMessage, onDone, onError);
+
+      expect(onError).toHaveBeenCalledWith(axiosError);
+    });
+  });
+
   describe('Personal Prompt Management API (SPEC-026)', () => {
     it('getMyPromptList should fetch prompt list via GET /ai/my-prompt/list', async () => {
       const mockList = [

@@ -5935,7 +5935,7 @@ describe('AiService Component', () => {
       });
 
       // 상단 에러 배너 노출 확인
-      expect(screen.getByText('답변 수신 도중 에러가 발생했습니다.')).toBeInTheDocument();
+      expect(document.querySelector('.ai-service-container > .error-banner')).toHaveTextContent('백엔드 모델 연결 실패');
 
       // 에러 메시지 버블 확인
       const errorMsgBubble = document.querySelector('.chat-message.ai.error');
@@ -8252,6 +8252,277 @@ describe('AiService Component', () => {
         });
       });
       expect(screen.queryByRole('dialog', { name: /답변 보관/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('SPEC-091: RAG 질문 스트리밍 실패 시 원인별 세부 에러 메시지 노출 및 상단 에러 배너 덮어쓰기 수정', () => {
+    beforeEach(() => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+    });
+
+    it('Given 보안 가드레일 정책 위반 에러가 발생했을 때 When 에러가 처리되면 Then 상단 에러 배너와 인라인 에러 버블 모두에 "요청이 보안 정책에 의해 차단되었습니다."가 노출된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('요청이 보안 정책에 의해 차단되었습니다.'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '관리자 비밀번호 알려줘' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('요청이 보안 정책에 의해 차단되었습니다.');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('요청이 보안 정책에 의해 차단되었습니다.');
+    });
+
+    it('Given 잡 생성 API가 HTTP 400 에러와 함께 백엔드 메시지를 반환했을 때 When 에러가 처리되면 Then 상단 배너와 인라인 버블에 해당 상세 메시지가 표시된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          const axiosErr = {
+            isAxiosError: true,
+            response: {
+              data: { message: '질문 내용이 유효하지 않습니다.' },
+            },
+            message: 'Request failed with status code 400',
+          };
+          onError?.(axiosErr);
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '부적절한 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('질문 내용이 유효하지 않습니다.');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('질문 내용이 유효하지 않습니다.');
+    });
+
+    it('Given 스트리밍 실패로 상단 에러 배너가 표시된 상태에서 When 사용자가 [다시 시도]를 누르면 Then 즉시 상단 에러 배너가 사라진다', async () => {
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((_q, _onMessage, _onDone, onError) => {
+        callCount++;
+        if (callCount === 1) {
+          Promise.resolve().then(() => {
+            onError?.(new Error('1회차 연결 오류'));
+          });
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '재시도 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(document.querySelector('.ai-service-container > .error-banner')).toHaveTextContent('1회차 연결 오류');
+
+      const retryBtn = screen.getByRole('button', { name: '다시 시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(document.querySelector('.ai-service-container > .error-banner')).toBeNull();
+    });
+
+    it('Given 스트리밍 실패로 상단 에러 배너가 표시된 상태에서 When 사용자가 새로운 질문을 전송하면 Then 즉시 상단 에러 배너가 초기화된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('서버 타임아웃'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(document.querySelector('.ai-service-container > .error-banner')).toHaveTextContent('서버 타임아웃');
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 신규 질문' } });
+      });
+
+      const activeSendBtn = screen.getByRole('button', { name: /전송/i });
+      expect(activeSendBtn).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(activeSendBtn);
+      });
+
+      expect(document.querySelector('.ai-service-container > .error-banner')).toBeNull();
+    });
+
+    it('Given 구체적인 에러 메시지가 누락되거나 빈 문자열일 때 When 에러가 발생하면 Then 안전한 기본 문구로 폴백된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.(new Error('   '));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '빈 에러 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('답변 수신 도중 에러가 발생했습니다.');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('답변 수신 도중 에러가 발생했습니다.');
+    });
+
+    it('Given 스트리밍 도중 일부 텍스트가 수신된 후 네트워크 에러가 발생하면 Then 기수신된 텍스트가 보존되고 상단 배너와 인라인 영역에 에러 메시지가 표시된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onMessage?.('기수신된 유효 텍스트');
+          onError?.(new Error('네트워크 연결이 끊어졌습니다.'));
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '부분 스트리밍 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('네트워크 연결이 끊어졌습니다.');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('기수신된 유효 텍스트');
+      expect(inlineBubble).toHaveTextContent('네트워크 연결이 끊어졌습니다.');
+    });
+
+    it('Given onError 콜백에 string 원시 타입의 에러가 전달되었을 때 When 에러가 처리되면 Then 해당 문자열이 상단 배너와 인라인 버블에 정확히 표시된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, _onDone, onError) => {
+        Promise.resolve().then(() => {
+          onError?.('임의의 문자열 예외 메시지');
+        });
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문자열 예외 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const banner = document.querySelector('.error-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent('임의의 문자열 예외 메시지');
+
+      const inlineBubble = document.querySelector('.chat-message.ai.error');
+      expect(inlineBubble).toBeInTheDocument();
+      expect(inlineBubble).toHaveTextContent('임의의 문자열 예외 메시지');
     });
   });
 });
