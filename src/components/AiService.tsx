@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useContext, useCallback } from 'react';
+import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -75,6 +76,57 @@ const PHASE_LABELS: Record<AgentPhase, string> = {
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
+
+const getErrorMessage = (error: unknown, fallback = '답변 수신 도중 에러가 발생했습니다.'): string => {
+  if (!error) return fallback;
+
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data;
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      if (typeof obj.message === 'string' && obj.message.trim()) {
+        return obj.message.trim();
+      }
+      if (typeof obj.error === 'string' && obj.error.trim()) {
+        return obj.error.trim();
+      }
+    }
+    if (error.message && error.message.trim()) {
+      return error.message.trim();
+    }
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const maybeAxios = error as { response?: { data?: unknown }; message?: unknown };
+    const data = maybeAxios.response?.data;
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      if (typeof obj.message === 'string' && obj.message.trim()) {
+        return obj.message.trim();
+      }
+      if (typeof obj.error === 'string' && obj.error.trim()) {
+        return obj.error.trim();
+      }
+    }
+    if (typeof maybeAxios.message === 'string' && maybeAxios.message.trim()) {
+      return maybeAxios.message.trim();
+    }
+  }
+
+  if (error instanceof Error) {
+    if (error.message && error.message.trim()) {
+      return error.message.trim();
+    }
+    return fallback;
+  }
+
+  if (typeof error === 'string') {
+    const trimmed = error.trim();
+    return trimmed || fallback;
+  }
+
+  return fallback;
+};
 
 export const AiService = () => {
   const authCtx = useContext(AuthContext);
@@ -707,6 +759,7 @@ export const AiService = () => {
   };
 
   const startQuestionStreaming = (currentQuestion: string, prevChatLog: ChatMessage[]) => {
+    setErrorMsg('');
     lastCancelledQuestionRef.current = currentQuestion;
     setIsStreaming(true);
     setStreamingAnswer('');
@@ -752,13 +805,8 @@ export const AiService = () => {
       },
       (error?: unknown) => {
         activeStreamCancelRef.current = null;
-        const errorDetails =
-          error instanceof Error
-            ? error.message
-            : typeof error === 'string'
-              ? error
-              : '답변 수신 도중 에러가 발생했습니다.';
-        setErrorMsg('답변 수신 도중 에러가 발생했습니다.');
+        const errorDetails = getErrorMessage(error);
+        setErrorMsg(errorDetails);
         lastFailedQuestionRef.current = currentQuestion;
         setChatLog((prev) => [
           ...prev,
@@ -796,6 +844,7 @@ export const AiService = () => {
     e.preventDefault();
     if (!question.trim() || isStreaming) return;
 
+    setErrorMsg('');
     const currentQuestion = question.trim();
     const prevChatLog = sessionId ? [] : chatLog;
     setQuestion('');
@@ -806,6 +855,7 @@ export const AiService = () => {
   const handleRetryQuestion = (questionText: string, errorMsgIndex?: number) => {
     if (isStreaming || !questionText.trim()) return;
 
+    setErrorMsg('');
     if (errorMsgIndex !== undefined) {
       const filteredLog = chatLog.filter((_, idx) => idx !== errorMsgIndex);
       const userMsgIndex =

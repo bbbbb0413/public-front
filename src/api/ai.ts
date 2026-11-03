@@ -460,6 +460,37 @@ export interface AskDoneMeta {
   refinedQueries?: string[];
 }
 
+const extractStreamErrorMessage = (data: unknown): string => {
+  const fallback = '답변 수신 도중 에러가 발생했습니다.';
+  if (!data) return fallback;
+  let parsed: unknown = data;
+  if (typeof data === 'string') {
+    const trimmed = data.trim();
+    if (!trimmed) return fallback;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) {
+      return obj.message.trim();
+    }
+    if (typeof obj.error === 'string' && obj.error.trim()) {
+      return obj.error.trim();
+    }
+  }
+
+  if (typeof parsed === 'string' && parsed.trim()) {
+    return parsed.trim();
+  }
+
+  return fallback;
+};
+
 export const askQuestionStream = (
   question: string,
   onMessage: (text: string) => void,
@@ -554,7 +585,7 @@ export const askQuestionStream = (
           return true;
         } else if (event.type === 'error') {
           completed = true;
-          onError(new Error((event.data as string) ?? '알 수 없는 오류'));
+          onError(new Error(extractStreamErrorMessage(event.data)));
           return true;
         }
         return false;
@@ -568,7 +599,31 @@ export const askQuestionStream = (
       if (isCancelled || (error instanceof DOMException && error.name === 'AbortError')) {
         return;
       }
-      onError(error);
+      let errToSend = error;
+      if (error && typeof error === 'object') {
+        const maybeAxios = error as {
+          isAxiosError?: boolean;
+          response?: { data?: unknown };
+          message?: string;
+        };
+        const data = maybeAxios.response?.data;
+        let detailMsg: string | undefined;
+        if (data && typeof data === 'object') {
+          const dataObj = data as Record<string, unknown>;
+          if (typeof dataObj.message === 'string' && dataObj.message.trim()) {
+            detailMsg = dataObj.message.trim();
+          } else if (typeof dataObj.error === 'string' && dataObj.error.trim()) {
+            detailMsg = dataObj.error.trim();
+          }
+        }
+        if (detailMsg) {
+          const wrapped = new Error(detailMsg);
+          Object.assign(wrapped, error);
+          wrapped.message = detailMsg;
+          errToSend = wrapped;
+        }
+      }
+      onError(errToSend);
     }
   };
 
