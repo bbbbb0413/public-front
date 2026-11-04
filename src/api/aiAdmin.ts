@@ -80,6 +80,8 @@ export const getCircuitBreakers = async (): Promise<CircuitBreaker[]> => {
 export interface RagasEval {
   traceId: string;
   question: string;
+  answer?: string;
+  contexts?: string[];
   faithfulness: number;
   answerRelevancy: number;
   contextPrecision: number;
