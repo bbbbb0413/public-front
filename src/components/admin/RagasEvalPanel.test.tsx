@@ -97,6 +97,57 @@ describe('RagasEvalPanel', () => {
     expect(within(dialog).getByText('참조된 지식베이스 컨텍스트가 없습니다.')).toBeInTheDocument();
   });
 
+  it('answer와 contexts 필드가 undefined인 레거시 데이터도 오류 없이 (답변 없음) 및 안내 문구를 렌더링한다', async () => {
+    const undefinedFieldEval: aiAdminApi.RagasEval = {
+      traceId: 'trace-undefined',
+      question: '미정의 필드 질문',
+      faithfulness: 0.8,
+      answerRelevancy: 0.7,
+      contextPrecision: 0.6,
+      sampledAt: '2026-11-05T01:00:00Z',
+    };
+    vi.mocked(aiAdminApi.getRagasEvals).mockResolvedValueOnce([undefinedFieldEval]);
+
+    render(<RagasEvalPanel />);
+
+    const detailButton = await screen.findByRole('button', { name: /상세/ });
+    fireEvent.click(detailButton);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText('(답변 없음)')).toBeInTheDocument();
+    expect(within(dialog).getByText('참조된 지식베이스 컨텍스트가 없습니다.')).toBeInTheDocument();
+    expect(within(dialog).getByText('참조된 컨텍스트 (0개)')).toBeInTheDocument();
+  });
+
+  it('행(row)에서 Space 키를 눌러도 상세 모달이 열린다', async () => {
+    vi.mocked(aiAdminApi.getRagasEvals).mockResolvedValueOnce([mockEvalItem]);
+
+    render(<RagasEvalPanel />);
+
+    const row = await screen.findByLabelText('테스트 질문입니다. 상세 보기');
+    fireEvent.keyDown(row, { key: ' ' });
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText('평가 상세 내역')).toBeInTheDocument();
+  });
+
+  it('모달 내부 컨텐츠 클릭 시 배경 오버레이로 클릭이 전파되지 않아 모달이 유지된다', async () => {
+    vi.mocked(aiAdminApi.getRagasEvals).mockResolvedValueOnce([mockEvalItem]);
+
+    render(<RagasEvalPanel />);
+
+    const detailButton = await screen.findByRole('button', { name: /상세/ });
+    fireEvent.click(detailButton);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.click(dialog);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('상세 모달에서 [닫기] 버튼을 누르면 모달이 닫힌다', async () => {
     vi.mocked(aiAdminApi.getRagasEvals).mockResolvedValueOnce([mockEvalItem]);
 
