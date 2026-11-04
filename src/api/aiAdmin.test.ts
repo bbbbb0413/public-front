@@ -175,6 +175,8 @@ describe('aiAdmin API', () => {
       {
         traceId: 'tr-1',
         question: 'q1',
+        answer: '답변 내용',
+        contexts: ['문맥 1', '문맥 2'],
         faithfulness: 0.9,
         answerRelevancy: 0.85,
         contextPrecision: 0.95,
@@ -189,5 +191,7 @@ describe('aiAdmin API', () => {
       params: { limit: 50 },
     });
     expect(result).toEqual(mockEvals);
+    expect(result[0].answer).toBe('답변 내용');
+    expect(result[0].contexts).toEqual(['문맥 1', '문맥 2']);
   });
 });
