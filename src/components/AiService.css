@@ -1522,6 +1522,85 @@
   line-height: 1.35;
 }
 
+/* ── 저신뢰도 경고 배너 및 질문 구체화 (SPEC-093) ── */
+.message-bubble.has-low-confidence {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.low-confidence-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.2rem 0.55rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 9999px;
+  line-height: 1.2;
+}
+
+.low-confidence-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #f87171;
+}
+
+.low-confidence-warning-content {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.low-confidence-warning-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  color: #ef4444;
+}
+
+.low-confidence-warning-text {
+  line-height: 1.35;
+  color: #fca5a5;
+}
+
+.btn-refine-question {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(239, 68, 68, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.9);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-refine-question:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #b91c1c;
+}
+
+.btn-refine-question:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── 세션 사이드바 ── */
 .chat-modal {
   display: flex;

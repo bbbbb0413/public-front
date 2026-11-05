@@ -886,6 +886,11 @@ export const AiService = () => {
     chatInputRef.current?.focus();
   };
 
+  const handleRefineQuestion = (questionText: string) => {
+    setQuestion(questionText);
+    chatInputRef.current?.focus();
+  };
+
   const handleAskMissingItem = (itemText: string) => {
     setQuestion(`"${itemText.trim()}"에 대해 자세히 설명해 줘`);
     chatInputRef.current?.focus();
@@ -1367,18 +1372,38 @@ export const AiService = () => {
                     질문을 입력하면 등록된 지식베이스 문서를 바탕으로 AI가 답변합니다.
                   </div>
                 )}
-                {chatLog.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}${msg.isCancelled ? ' cancelled' : ''}`}
-                  >
-                    <div className={`message-bubble${msg.sender === 'ai' && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}`}>
-                      {msg.sender === 'ai' && msg.missing && msg.missing.length > 0 && (
-                        <div className="missing-warning-badge" data-testid="missing-warning-badge">
-                          추가 확인 필요
-                        </div>
-                      )}
-                      {msg.sender === 'ai' ? (
+                {chatLog.map((msg, idx) => {
+                  const isAi = msg.sender === 'ai';
+                  const isNoSources = !msg.sources || msg.sources.length === 0;
+                  const isUngrounded =
+                    isAi &&
+                    isNoSources &&
+                    (msg.confidence === 0 || (msg.missing && msg.missing.length > 0));
+                  const isLowConfidence =
+                    isAi &&
+                    msg.confidence !== undefined &&
+                    msg.confidence < 0.6 &&
+                    !isUngrounded;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}${msg.isCancelled ? ' cancelled' : ''}`}
+                    >
+                      <div
+                        className={`message-bubble${isAi && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}`}
+                      >
+                        {isAi && msg.missing && msg.missing.length > 0 && (
+                          <div className="missing-warning-badge" data-testid="missing-warning-badge">
+                            추가 확인 필요
+                          </div>
+                        )}
+                        {isLowConfidence && (
+                          <div className="low-confidence-badge" data-testid="low-confidence-badge">
+                            [답변 신뢰도 낮음]
+                          </div>
+                        )}
+                        {msg.sender === 'ai' ? (
                         msg.isCancelled ? (
                           <div className="cancelled-message-content">
                             <div className="cancelled-banner">
@@ -1487,23 +1512,43 @@ export const AiService = () => {
                           </div>
                         ) : (
                           <>
-                          {(() => {
-                            const isNoSources = !msg.sources || msg.sources.length === 0;
-                            const isUngrounded =
-                              isNoSources &&
-                              (msg.confidence === 0 || (msg.missing && msg.missing.length > 0));
-                            if (!isUngrounded) return null;
-                            return (
-                              <div className="ungrounded-warning" data-testid="ungrounded-warning">
-                                <span className="ungrounded-warning-icon" aria-hidden="true">
+                          {isUngrounded ? (
+                            <div className="ungrounded-warning" data-testid="ungrounded-warning">
+                              <span className="ungrounded-warning-icon" aria-hidden="true">
+                                ⚠
+                              </span>
+                              <span className="ungrounded-warning-text">
+                                근거 문서 미발견 (모델 일반 지식 기반 답변)
+                              </span>
+                            </div>
+                          ) : isLowConfidence ? (
+                            <div className="low-confidence-warning" data-testid="low-confidence-warning">
+                              <div className="low-confidence-warning-content">
+                                <span className="low-confidence-warning-icon" aria-hidden="true">
                                   ⚠
                                 </span>
-                                <span className="ungrounded-warning-text">
-                                  근거 문서 미발견 (모델 일반 지식 기반 답변)
+                                <span className="low-confidence-warning-text">
+                                  지식베이스와의 관련도가 낮아 답변이 부정확할 수 있습니다. 질문을 더 구체적으로 작성해 보세요.
                                 </span>
                               </div>
-                            );
-                          })()}
+                              <button
+                                type="button"
+                                className="btn-refine-question"
+                                data-testid="btn-refine-question"
+                                onClick={() => {
+                                  const relatedQuestion =
+                                    chatLog
+                                      .slice(0, idx)
+                                      .reverse()
+                                      .find((m) => m.sender === 'user')?.text || '';
+                                  handleRefineQuestion(relatedQuestion);
+                                }}
+                                disabled={isStreaming}
+                              >
+                                질문 구체화
+                              </button>
+                            </div>
+                          ) : null}
                           <ReactMarkdown
                             remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                             rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
@@ -1683,7 +1728,8 @@ export const AiService = () => {
                       )}
                     </div>
                   </div>
-                ))}
+                );
+              })}
                 {isStreaming && (
                   <div className="chat-message ai">
                     <div className="message-bubble streaming">

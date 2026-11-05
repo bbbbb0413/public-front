@@ -8525,4 +8525,380 @@ describe('AiService Component', () => {
       expect(inlineBubble).toHaveTextContent('임의의 문자열 예외 메시지');
     });
   });
+
+  describe('Low Confidence Warning & Refine Question (SPEC-093)', () => {
+    const mockAuthContext = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('AC 1: Given 응답 신뢰도가 45%(0.45)로 60% 미만일 때 When 스트리밍이 완료되면 Then AI 메시지 버블에 has-low-confidence 클래스가 적용되고 [답변 신뢰도 낮음] 배지와 주의 안내 배너가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            {
+              documentId: 'doc-1',
+              fileName: 'doc1.pdf',
+              score: 0.45,
+              snippet: '샘플 근거 청크',
+              chunkIndex: 0,
+            },
+          ]);
+          onMessage('신뢰도가 낮은 답변 내용입니다.');
+          onDone?.({
+            confidence: 0.45,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '불확실한 정보에 대한 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const messageBubble = document.querySelector('.chat-message.ai .message-bubble');
+      expect(messageBubble).toBeInTheDocument();
+      expect(messageBubble).toHaveClass('has-low-confidence');
+
+      const lowConfBadge = screen.getByTestId('low-confidence-badge');
+      expect(lowConfBadge).toBeInTheDocument();
+      expect(lowConfBadge).toHaveTextContent('답변 신뢰도 낮음');
+
+      const warningBanner = screen.getByTestId('low-confidence-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent(
+        '지식베이스와의 관련도가 낮아 답변이 부정확할 수 있습니다. 질문을 더 구체적으로 작성해 보세요.'
+      );
+
+      const refineBtn = within(warningBanner).getByRole('button', { name: /질문 구체화/i });
+      expect(refineBtn).toBeInTheDocument();
+      expect(refineBtn).toHaveClass('btn-refine-question');
+    });
+
+    it('AC 2: Given 저신뢰도 답변 버블에 [질문 구체화] 버튼이 표시된 상태에서 When 사용자가 [질문 구체화] 버튼을 클릭하면 Then 직전 사용자 질문이 입력창에 복원되고 포커스된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            {
+              documentId: 'doc-1',
+              fileName: 'doc1.pdf',
+              score: 0.4,
+              snippet: '근거 청크',
+              chunkIndex: 0,
+            },
+          ]);
+          onMessage('모호한 질문에 대한 답변');
+          onDone?.({
+            confidence: 0.4,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '프로젝트 환불 정책 알려줘' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      expect(input.value).toBe('');
+
+      const refineBtn = screen.getByRole('button', { name: /질문 구체화/i });
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('프로젝트 환불 정책 알려줘');
+      expect(input).toHaveFocus();
+    });
+
+    it('AC 3: Given 신뢰도가 85%(0.85)인 정상 답변인 경우 When 렌더링되면 Then 저신뢰도 경고 배너와 [질문 구체화] 버튼이 노출되지 않고 녹색 신뢰도 85% 배지만 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            {
+              documentId: 'doc-1',
+              fileName: 'doc1.pdf',
+              score: 0.85,
+              snippet: '정확한 근거 청크',
+              chunkIndex: 0,
+            },
+          ]);
+          onMessage('충분한 근거 기반 답변입니다.');
+          onDone?.({
+            confidence: 0.85,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '정상 신뢰도 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const messageBubble = document.querySelector('.chat-message.ai .message-bubble');
+      expect(messageBubble).not.toHaveClass('has-low-confidence');
+      expect(screen.queryByTestId('low-confidence-badge')).toBeNull();
+      expect(screen.queryByTestId('low-confidence-warning')).toBeNull();
+      expect(screen.queryByRole('button', { name: /질문 구체화/i })).toBeNull();
+
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toHaveClass('confidence-high');
+      expect(confBadge).toHaveTextContent('85%');
+    });
+
+    it('AC 4: Given 신뢰도 정보가 undefined인 레거시 세션 메시지를 불러온 경우 When 세션 상세가 렌더링되면 Then 저신뢰도 경고 배너가 표시되지 않고 오류 없이 기본 텍스트만 정상 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-legacy', title: '레거시 세션', updatedAt: '2026-11-01T00:00:00Z' },
+      ]);
+
+      const mockLegacyDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-legacy',
+        title: '레거시 세션',
+        createdAt: '2026-11-01T00:00:00Z',
+        updatedAt: '2026-11-01T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '레거시 질문',
+            createdAt: '2026-11-01T00:00:01Z',
+          },
+          {
+            role: 'assistant',
+            content: '신뢰도 필드가 없는 레거시 답변 텍스트',
+            createdAt: '2026-11-01T00:00:02Z',
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockLegacyDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContext}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('레거시 세션'));
+      });
+
+      const messageBubble = document.querySelector('.chat-message.ai .message-bubble');
+      expect(messageBubble).toBeInTheDocument();
+      expect(messageBubble).not.toHaveClass('has-low-confidence');
+      expect(screen.queryByTestId('low-confidence-badge')).toBeNull();
+      expect(screen.queryByTestId('low-confidence-warning')).toBeNull();
+      expect(within(messageBubble as HTMLElement).getByText('신뢰도 필드가 없는 레거시 답변 텍스트')).toBeInTheDocument();
+    });
+
+    it('AC 5: Given 영속화된 신뢰도가 60% 미만인 과거 세션을 불러왔을 때 When 세션 상세가 렌더링되면 Then 저신뢰도 주의 배너와 질문 구체화 버튼이 복원되고 질문 복원이 동작한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-low-history', title: '과거 저신뢰도 세션', updatedAt: '2026-11-02T00:00:00Z' },
+      ]);
+
+      const mockDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-low-history',
+        title: '과거 저신뢰도 세션',
+        createdAt: '2026-11-02T00:00:00Z',
+        updatedAt: '2026-11-02T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '과거에 보냈던 이전 질문',
+            createdAt: '2026-11-02T00:00:01Z',
+          },
+          {
+            role: 'assistant',
+            content: '저신뢰도 과거 답변',
+            confidence: 0.52,
+            sources: [
+              {
+                documentId: 'doc-old',
+                fileName: 'old.pdf',
+                score: 0.52,
+                snippet: '과거 청크',
+                chunkIndex: 0,
+              },
+            ],
+            createdAt: '2026-11-02T00:00:02Z',
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContext}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('과거 저신뢰도 세션'));
+      });
+
+      const messageBubble = document.querySelector('.chat-message.ai .message-bubble');
+      expect(messageBubble).toHaveClass('has-low-confidence');
+      expect(screen.getByTestId('low-confidence-badge')).toBeInTheDocument();
+      expect(screen.getByTestId('low-confidence-warning')).toBeInTheDocument();
+
+      const refineBtn = screen.getByRole('button', { name: /질문 구체화/i });
+      expect(refineBtn).toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('과거에 보냈던 이전 질문');
+      expect(input).toHaveFocus();
+    });
+
+    it('AC 6: Given 답변 스트리밍이 진행 중(isStreaming === true)일 때 When 이전 대화 내역의 저신뢰도 답변 버블을 확인하면 Then [질문 구체화] 버튼이 disabled 상태로 비활성화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      // 첫 번째 스트리밍: 신뢰도 0.4로 완료되어 chatLog에 추가
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            {
+              documentId: 'doc-1',
+              fileName: 'doc1.pdf',
+              score: 0.4,
+              snippet: '청크',
+              chunkIndex: 0,
+            },
+          ]);
+          onMessage('첫 번째 저신뢰도 답변');
+          onDone?.({
+            confidence: 0.4,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1회차 질문 완료
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: /질문 구체화/i });
+      expect(refineBtn).not.toBeDisabled();
+
+      // 두 번째 질문 시작: 스트리밍이 끝나지 않고 계속 유지되도록 모킹
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 질문 시작' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 이제 isStreaming === true 상태
+      expect(refineBtn).toBeDisabled();
+    });
+  });
 });
