@@ -8900,5 +8900,185 @@ describe('AiService Component', () => {
       // 이제 isStreaming === true 상태
       expect(refineBtn).toBeDisabled();
     });
+
+    it('QA 1: Given 응답 신뢰도가 정확히 60%(0.60)인 경계값일 때 When 스트리밍이 완료되면 Then 저신뢰도 배너 및 has-low-confidence 클래스가 노출되지 않고 정상 신뢰도 60% 배지만 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            {
+              documentId: 'doc-boundary',
+              fileName: 'doc-boundary.pdf',
+              score: 0.6,
+              snippet: '경계값 근거 청크',
+              chunkIndex: 0,
+            },
+          ]);
+          onMessage('신뢰도 60% 경계값 답변입니다.');
+          onDone?.({
+            confidence: 0.6,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '신뢰도 60% 경계값 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const messageBubble = document.querySelector('.chat-message.ai .message-bubble');
+      expect(messageBubble).not.toHaveClass('has-low-confidence');
+      expect(screen.queryByTestId('low-confidence-badge')).toBeNull();
+      expect(screen.queryByTestId('low-confidence-warning')).toBeNull();
+      expect(screen.queryByRole('button', { name: /질문 구체화/i })).toBeNull();
+
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toHaveTextContent('60%');
+    });
+
+    it('QA 2: Given 출처가 없어 [근거 문서 미발견] 배너가 표시되는 경우(isUngrounded) When 답변이 렌더링되면 Then 저신뢰도 배너(low-confidence-warning)와 중복 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([]);
+          onMessage('출처 없는 일반 지식 답변입니다.');
+          onDone?.({
+            confidence: 0,
+            missing: [],
+          });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '근거 문서가 없는 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      expect(screen.getByTestId('ungrounded-warning')).toBeInTheDocument();
+      expect(screen.queryByTestId('low-confidence-warning')).toBeNull();
+      expect(screen.queryByTestId('low-confidence-badge')).toBeNull();
+      expect(screen.queryByRole('button', { name: /질문 구체화/i })).toBeNull();
+    });
+
+    it('QA 3: Given 대화 내역에 여러 개의 저신뢰도 답변이 존재하는 복수 턴 상황에서 When 특정 턴의 [질문 구체화] 버튼을 클릭하면 Then 직전 사용자 질문이 정확히 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      // 1턴 스트리밍
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            { documentId: 'doc-1', fileName: 'doc1.pdf', score: 0.35, snippet: '1턴 청크', chunkIndex: 0 },
+          ]);
+          onMessage('1턴 저신뢰도 답변');
+          onDone?.({ confidence: 0.35, missing: [] });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1턴 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '첫 번째 질문 내용' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 2턴 스트리밍
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        setTimeout(() => {
+          onSources?.([
+            { documentId: 'doc-2', fileName: 'doc2.pdf', score: 0.42, snippet: '2턴 청크', chunkIndex: 0 },
+          ]);
+          onMessage('2턴 저신뢰도 답변');
+          onDone?.({ confidence: 0.42, missing: [] });
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      // 2턴 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 질문 내용' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const refineButtons = screen.getAllByRole('button', { name: /질문 구체화/i });
+      expect(refineButtons).toHaveLength(2);
+
+      // 첫 번째 답변의 [질문 구체화] 클릭 시 '첫 번째 질문 내용' 복원
+      await act(async () => {
+        fireEvent.click(refineButtons[0]);
+      });
+      expect(input.value).toBe('첫 번째 질문 내용');
+      expect(input).toHaveFocus();
+
+      // 두 번째 답변의 [질문 구체화] 클릭 시 '두 번째 질문 내용' 복원
+      await act(async () => {
+        fireEvent.click(refineButtons[1]);
+      });
+      expect(input.value).toBe('두 번째 질문 내용');
+      expect(input).toHaveFocus();
+    });
   });
 });
