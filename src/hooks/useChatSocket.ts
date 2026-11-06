@@ -6,6 +6,7 @@ import { GATEWAY_BASE_URL } from '../utils/gateway-url';
 interface HistoryMessage {
   messageId: string;
   senderUuid: string;
+  senderNickname?: string;
   content: string;
   createdAt: number;
 }
@@ -54,7 +55,7 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
             status: 0,
             senderId: m.senderUuid,
             content: m.content,
-            metadata: '',
+            metadata: m.senderNickname || '',
             timestamp: m.createdAt,
             eventTimestamp: m.createdAt * 1000,
           }));
