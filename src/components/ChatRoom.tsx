@@ -82,7 +82,7 @@ export const ChatRoom = () => {
 
               return (
                 <div key={msg.id} className={`message-bubble-row ${isMine ? 'mine' : 'other'}`}>
-                  <div className="msg-sender-lbl">{msg.senderId}</div>
+                  <div className="msg-sender-lbl">{msg.metadata || msg.senderId}</div>
                   <div className="msg-bubble-box">
                     <p className="msg-content-text">{msg.content}</p>
                     <span className="msg-time-lbl">{formattedTime}</span>
