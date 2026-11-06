@@ -112,4 +112,90 @@ describe('ChatRoom Component', () => {
     expect(screen.getByText('uuid-user-2')).toBeInTheDocument();
     expect(screen.queryByText('uuid-user-1')).not.toBeInTheDocument();
   });
+
+  it('renders own message sender nickname when metadata is present (AC 1)', () => {
+    vi.spyOn(useChatSocketModule, 'useChatSocket').mockReturnValue({
+      messages: [
+        {
+          id: 'msg-mine-1',
+          status: 0,
+          senderId: 'my-uuid',
+          content: '내가 보낸 메시지',
+          metadata: '플레이어A',
+          timestamp: 1710000000000,
+          eventTimestamp: 1710000000000000,
+        },
+      ],
+      connected: true,
+      error: null,
+      sendMessage: vi.fn(),
+    });
+
+    renderChatRoom();
+
+    const senderLabel = screen.getByText('플레이어A');
+    expect(senderLabel).toBeInTheDocument();
+    expect(senderLabel).toHaveClass('msg-sender-lbl');
+    expect(screen.queryByText('my-uuid')).not.toBeInTheDocument();
+  });
+
+  it('falls back to senderId when metadata is undefined or only whitespace (AC 2)', () => {
+    vi.spyOn(useChatSocketModule, 'useChatSocket').mockReturnValue({
+      messages: [
+        {
+          id: 'msg-undef',
+          status: 0,
+          senderId: 'legacy-undef-uuid',
+          content: '메타데이터가 없는 메시지',
+          metadata: undefined as unknown as string,
+          timestamp: 1710000000000,
+          eventTimestamp: 1710000000000000,
+        },
+      ],
+      connected: true,
+      error: null,
+      sendMessage: vi.fn(),
+    });
+
+    renderChatRoom();
+
+    const senderLabel = screen.getByText('legacy-undef-uuid');
+    expect(senderLabel).toBeInTheDocument();
+    expect(senderLabel).toHaveClass('msg-sender-lbl');
+  });
+
+  it('renders join_room history messages showing sender nicknames (AC 5)', () => {
+    vi.spyOn(useChatSocketModule, 'useChatSocket').mockReturnValue({
+      messages: [
+        {
+          id: 'hist-1',
+          status: 0,
+          senderId: 'other-uuid-1',
+          content: '이전 대화 내용 1',
+          metadata: '작성자1',
+          timestamp: 1710000000000,
+          eventTimestamp: 1710000000000000,
+        },
+        {
+          id: 'hist-2',
+          status: 0,
+          senderId: 'other-uuid-2',
+          content: '이전 대화 내용 2',
+          metadata: '작성자2',
+          timestamp: 1710000001000,
+          eventTimestamp: 1710000001000000,
+        },
+      ],
+      connected: true,
+      error: null,
+      sendMessage: vi.fn(),
+    });
+
+    renderChatRoom();
+
+    expect(screen.getByText('작성자1')).toBeInTheDocument();
+    expect(screen.getByText('작성자2')).toBeInTheDocument();
+    expect(screen.queryByText('other-uuid-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('other-uuid-2')).not.toBeInTheDocument();
+  });
 });

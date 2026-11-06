@@ -57,6 +57,44 @@ describe('FlatBuffers Chat Utilities', () => {
     expect(decoded.messages[0].id).toBe('msg-1');
     expect(decoded.messages[0].content).toBe('Hi there');
     expect(decoded.messages[0].senderId).toBe('user-1');
+    expect(decoded.messages[0].metadata).toBe('');
     expect(decoded.latestEventTimestamp).toBe(1710000000000000);
+  });
+
+  it('should decode MessageBatch with sender nickname in metadata correctly (AC 1)', () => {
+    const builder = new flatbuffers.Builder(1024);
+
+    const idOffset = builder.createString('msg-nick');
+    const senderIdOffset = builder.createString('user-uuid-1234');
+    const contentOffset = builder.createString('안녕하세요!');
+    const metadataOffset = builder.createString('플레이어A');
+
+    Chat.ChatMessage.startChatMessage(builder);
+    Chat.ChatMessage.addId(builder, idOffset);
+    Chat.ChatMessage.addStatus(builder, Chat.MessageStatus.NORMAL);
+    Chat.ChatMessage.addSenderId(builder, senderIdOffset);
+    Chat.ChatMessage.addContent(builder, contentOffset);
+    Chat.ChatMessage.addMetadata(builder, metadataOffset);
+    Chat.ChatMessage.addTimestamp(builder, BigInt(1710000000000));
+    Chat.ChatMessage.addEventTimestamp(builder, BigInt(1710000000000000));
+    const msgOffset = Chat.ChatMessage.endChatMessage(builder);
+
+    const messagesVector = Chat.MessageBatch.createMessagesVector(builder, [msgOffset]);
+
+    Chat.MessageBatch.startMessageBatch(builder);
+    Chat.MessageBatch.addMessages(builder, messagesVector);
+    Chat.MessageBatch.addLatestEventTimestamp(builder, BigInt(1710000000000000));
+    const batchOffset = Chat.MessageBatch.endMessageBatch(builder);
+    builder.finish(batchOffset);
+
+    const batchBuffer = builder.asUint8Array();
+
+    const decoded = decodeMessageBatch(batchBuffer);
+
+    expect(decoded.messages).toHaveLength(1);
+    expect(decoded.messages[0].id).toBe('msg-nick');
+    expect(decoded.messages[0].senderId).toBe('user-uuid-1234');
+    expect(decoded.messages[0].metadata).toBe('플레이어A');
+    expect(decoded.messages[0].content).toBe('안녕하세요!');
   });
 });

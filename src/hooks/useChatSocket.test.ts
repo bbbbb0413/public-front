@@ -148,4 +148,102 @@ describe('useChatSocket Hook', () => {
       })
     );
   });
+
+  it('maps empty senderNickname to empty string metadata safely (AC 2 fallback)', () => {
+    const { result } = renderHook(() =>
+      useChatSocket({ roomId: 'lobby', token: 'valid-token' })
+    );
+
+    act(() => {
+      eventHandlers['connect']?.();
+    });
+
+    const joinRoomCall = mockSocket.emit.mock.calls.find(
+      (call: unknown[]) => Array.isArray(call) && call[0] === 'join_room'
+    );
+    const joinRoomCallback = joinRoomCall?.[2] as (response: unknown) => void;
+
+    act(() => {
+      joinRoomCallback({
+        success: true,
+        messages: [
+          {
+            messageId: 'legacy-msg',
+            senderUuid: 'legacy-uuid',
+            senderNickname: '',
+            content: '레거시 본문',
+            createdAt: 1710000000,
+          },
+        ],
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].metadata).toBe('');
+    expect(result.current.messages[0].senderId).toBe('legacy-uuid');
+  });
+
+  it('handles empty messages array in join_room response safely', () => {
+    const { result } = renderHook(() =>
+      useChatSocket({ roomId: 'empty-room', token: 'valid-token' })
+    );
+
+    act(() => {
+      eventHandlers['connect']?.();
+    });
+
+    const joinRoomCall = mockSocket.emit.mock.calls.find(
+      (call: unknown[]) => Array.isArray(call) && call[0] === 'join_room'
+    );
+    const joinRoomCallback = joinRoomCall?.[2] as (response: unknown) => void;
+
+    act(() => {
+      joinRoomCallback({
+        success: true,
+        messages: [],
+      });
+    });
+
+    expect(result.current.messages).toEqual([]);
+  });
+
+  it('filters out duplicate messages on new_messages while preserving metadata', async () => {
+    const { decodeMessageBatch } = vi.mocked(await import('../flatbuffers/chatUtils'));
+    decodeMessageBatch.mockReturnValue({
+      messages: [
+        {
+          id: 'dup-1',
+          status: 0,
+          senderId: 'uuid-user-1',
+          content: '첫 번째 수신',
+          metadata: '유저1',
+          timestamp: 1710000001,
+          eventTimestamp: 1710000001000,
+        },
+      ],
+      latestEventTimestamp: 1710000001000,
+    });
+
+    const { result } = renderHook(() =>
+      useChatSocket({ roomId: 'lobby', token: 'valid-token' })
+    );
+
+    act(() => {
+      eventHandlers['connect']?.();
+    });
+
+    // 1차 수신
+    act(() => {
+      eventHandlers['new_messages']?.('lobby', new ArrayBuffer(8));
+    });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].metadata).toBe('유저1');
+
+    // 동일한 메시지 id로 2차 수신 (중복)
+    act(() => {
+      eventHandlers['new_messages']?.('lobby', new ArrayBuffer(8));
+    });
+    // 중복 제거되어 여전히 1개 유지
+    expect(result.current.messages).toHaveLength(1);
+  });
 });
