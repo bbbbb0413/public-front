@@ -60,6 +60,26 @@ interface ChatMessage {
   refinedQueries?: string[];
 }
 
+const getSessionTurnIndex = (chatLog: ChatMessage[], index: number): number => {
+  const excludedIndices = new Set<number>();
+  chatLog.forEach((msg, i) => {
+    if (msg.isError) {
+      excludedIndices.add(i);
+      if (i > 0 && chatLog[i - 1]?.sender === 'user') {
+        excludedIndices.add(i - 1);
+      }
+    }
+  });
+
+  let validCount = 0;
+  for (let i = 0; i <= index; i++) {
+    if (!excludedIndices.has(i)) {
+      validCount++;
+    }
+  }
+  return validCount - 1;
+};
+
 const STEP_LABELS: Record<string, string> = {
   extract: '텍스트 추출 중',
   chunk: '청크 분할 중',
@@ -891,6 +911,18 @@ export const AiService = () => {
     chatInputRef.current?.focus();
   };
 
+  const handleRefineFeedbackQuestion = (msgIndex: number) => {
+    const previousUserMsg = chatLog
+      .slice(0, msgIndex)
+      .reverse()
+      .find((m) => m.sender === 'user');
+    const questionText = previousUserMsg?.text || '';
+    if (questionText) {
+      setQuestion(questionText);
+      chatInputRef.current?.focus();
+    }
+  };
+
   const handleAskMissingItem = (itemText: string) => {
     setQuestion(`"${itemText.trim()}"에 대해 자세히 설명해 줘`);
     chatInputRef.current?.focus();
@@ -1373,6 +1405,7 @@ export const AiService = () => {
                   </div>
                 )}
                 {chatLog.map((msg, idx) => {
+                  const turnIndex = getSessionTurnIndex(chatLog, idx);
                   const isAi = msg.sender === 'ai';
                   const isNoSources = !msg.sources || msg.sources.length === 0;
                   const isUngrounded =
@@ -1699,7 +1732,7 @@ export const AiService = () => {
                               <button
                                 type="button"
                                 className="btn-bookmark-answer"
-                                onClick={(e) => handleBookmarkAnswer(idx, msg.text || '', e)}
+                                onClick={(e) => handleBookmarkAnswer(turnIndex, msg.text || '', e)}
                                 aria-label="답변 보관"
                               >
                                 ★ 보관
@@ -1716,12 +1749,24 @@ export const AiService = () => {
                           </div>
                           {sessionId && (
                             <AnswerFeedback
-                              key={`${sessionId}-${idx}`}
-                              existing={feedbackByTurn[idx]}
-                              onSubmit={(input) => handleSubmitFeedback(idx, input)}
-                              onDelete={() => handleDeleteFeedback(idx)}
+                              key={`${sessionId}-${turnIndex}`}
+                              existing={feedbackByTurn[turnIndex]}
+                              onSubmit={(input) => handleSubmitFeedback(turnIndex, input)}
+                              onDelete={() => handleDeleteFeedback(turnIndex)}
                             />
                           )}
+                          {sessionId &&
+                            feedbackByTurn[turnIndex]?.accuracy != null &&
+                            feedbackByTurn[turnIndex].accuracy <= 2 && (
+                              <button
+                                type="button"
+                                className="btn-feedback-refine"
+                                onClick={() => handleRefineFeedbackQuestion(idx)}
+                                disabled={isStreaming}
+                              >
+                                질문 보완하여 다시 질문
+                              </button>
+                            )}
                         </>
                       )) : (
                         msg.text
