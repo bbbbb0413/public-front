@@ -4,6 +4,38 @@ import type { AnswerFeedbackOut } from '../api/ai';
 const RATINGS = [1, 2, 3, 4, 5] as const;
 const MAX_COMMENT_LENGTH = 1000;
 
+const FEEDBACK_REASONS = [
+  '환각/사실 오류',
+  '근거 문서와 다름',
+  '질문 의도와 무관',
+  '내용 불완전/부족',
+  '최신 정보 아님',
+] as const;
+
+const parseReasonsFromComment = (comment: string): string[] => {
+  if (!comment) return [];
+  const matches = comment.match(/\[([^\]]+)\]/g);
+  if (!matches) return [];
+  const valid = new Set<string>(FEEDBACK_REASONS);
+  const found: string[] = [];
+  for (const match of matches) {
+    const text = match.slice(1, -1).trim();
+    if (valid.has(text) && !found.includes(text)) {
+      found.push(text);
+    }
+  }
+  return found;
+};
+
+const stripReasonTags = (comment: string): string => {
+  if (!comment) return '';
+  let result = comment;
+  for (const reason of FEEDBACK_REASONS) {
+    result = result.split(`[${reason}]`).join('');
+  }
+  return result.replace(/^\s+/, '').trimEnd();
+};
+
 const ACCURACY_LABELS: Record<number, string> = {
   1: '전혀 정확하지 않다',
   2: '정확하지 않다',
@@ -87,6 +119,9 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
     existing?.helpfulness ?? null,
   );
   const [comment, setComment] = useState(existing?.comment ?? '');
+  const [selectedReasons, setSelectedReasons] = useState<string[]>(() =>
+    parseReasonsFromComment(existing?.comment ?? ''),
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +132,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
     setAccuracy(existing?.accuracy ?? null);
     setHelpfulness(existing?.helpfulness ?? null);
     setComment(existing?.comment ?? '');
+    setSelectedReasons(parseReasonsFromComment(existing?.comment ?? ''));
   }
 
   const effectiveExisting = deleted ? undefined : existing;
@@ -107,6 +143,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
     setAccuracy(effectiveExisting?.accuracy ?? null);
     setHelpfulness(effectiveExisting?.helpfulness ?? null);
     setComment(effectiveExisting?.comment ?? '');
+    setSelectedReasons(parseReasonsFromComment(effectiveExisting?.comment ?? ''));
     setError(null);
   };
 
@@ -118,6 +155,30 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
   const handleCancel = () => {
     resetForm();
     setIsOpen(false);
+  };
+
+  const handleAccuracyChange = (val: number) => {
+    setAccuracy(val);
+    if (val >= 3) {
+      if (selectedReasons.length > 0) {
+        setSelectedReasons([]);
+        setComment((prev) => stripReasonTags(prev));
+      }
+    }
+  };
+
+  const handleToggleReason = (reason: string) => {
+    const isCurrentlySelected = selectedReasons.includes(reason);
+    const nextReasons = isCurrentlySelected
+      ? selectedReasons.filter((r) => r !== reason)
+      : [...selectedReasons, reason];
+
+    const prefix = nextReasons.map((r) => `[${r}]`).join(' ');
+    const customText = stripReasonTags(comment);
+    const nextComment = prefix ? (customText ? `${prefix} ${customText}` : prefix) : customText;
+
+    setSelectedReasons(nextReasons);
+    setComment(nextComment);
   };
 
   const handleSubmit = async () => {
@@ -153,6 +214,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
       setAccuracy(null);
       setHelpfulness(null);
       setComment('');
+      setSelectedReasons([]);
       setIsOpen(false);
     } catch {
       setError('평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -198,7 +260,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
         name="accuracy"
         labels={ACCURACY_LABELS}
         value={accuracy}
-        onChange={setAccuracy}
+        onChange={handleAccuracyChange}
       />
       <RatingScale
         legend="유용성"
@@ -207,6 +269,28 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
         value={helpfulness}
         onChange={setHelpfulness}
       />
+
+      {accuracy !== null && accuracy <= 2 && (
+        <div className="feedback-reasons-group" data-testid="feedback-reasons-group">
+          <span className="feedback-reasons-title">어떤 점이 아쉬웠나요?</span>
+          <div className="feedback-reasons-chips">
+            {FEEDBACK_REASONS.map((reason) => {
+              const isSelected = selectedReasons.includes(reason);
+              return (
+                <button
+                  key={reason}
+                  type="button"
+                  className={`feedback-reason-chip${isSelected ? ' selected' : ''}`}
+                  aria-pressed={isSelected}
+                  onClick={() => handleToggleReason(reason)}
+                >
+                  {reason}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <label className="feedback-comment-label">
         <span>의견 (선택)</span>

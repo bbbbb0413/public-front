@@ -303,5 +303,88 @@ describe('AnswerFeedback', () => {
     expect(screen.getByRole('textbox')).toHaveValue('근거가 좋았다');
     expect(screen.getByRole('button', { name: '평가 삭제' })).toBeEnabled();
   });
+
+  describe('불만족 사유 칩 (SPEC-095)', () => {
+    it('정확도 1점 또는 2점 선택 시 "어떤 점이 아쉬웠나요?" 안내와 5개 불만족 사유 칩이 노출된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+
+      expect(screen.queryByText('어떤 점이 아쉬웠나요?')).not.toBeInTheDocument();
+
+      pick('정확도', 1);
+      expect(screen.getByText('어떤 점이 아쉬웠나요?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '환각/사실 오류' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '근거 문서와 다름' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '질문 의도와 무관' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '내용 불완전/부족' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '최신 정보 아님' })).toBeInTheDocument();
+    });
+
+    it('사유 칩 클릭 시 의견 입력 필드에 대괄호 태그 접두사가 자동 채워지고 칩이 선택된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+      pick('정확도', 2);
+
+      const hallucinationChip = screen.getByRole('button', { name: '환각/사실 오류' });
+      const docDiffChip = screen.getByRole('button', { name: '근거 문서와 다름' });
+
+      fireEvent.click(hallucinationChip);
+      expect(hallucinationChip).toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue('[환각/사실 오류]');
+
+      fireEvent.click(docDiffChip);
+      expect(docDiffChip).toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue('[환각/사실 오류] [근거 문서와 다름]');
+    });
+
+    it('선택된 사유 칩을 다시 클릭하면 선택이 해제되고 코멘트에서 태그가 제거된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+      pick('정확도', 1);
+
+      const hallucinationChip = screen.getByRole('button', { name: '환각/사실 오류' });
+      const docDiffChip = screen.getByRole('button', { name: '근거 문서와 다름' });
+
+      fireEvent.click(hallucinationChip);
+      fireEvent.click(docDiffChip);
+      fireEvent.click(hallucinationChip);
+
+      expect(hallucinationChip).not.toHaveClass('selected');
+      expect(docDiffChip).toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue('[근거 문서와 다름]');
+    });
+
+    it('사유 태그 선택 후 추가 의견을 적은 상태에서 정확도를 4점으로 변경하면 사유 칩 영역이 사라지고 사유 태그 입력이 초기화된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+      pick('정확도', 1);
+
+      fireEvent.click(screen.getByRole('button', { name: '환각/사실 오류' }));
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: '[환각/사실 오류] 추가 상세 내용입니다.' },
+      });
+
+      pick('정확도', 4);
+      expect(screen.queryByText('어떤 점이 아쉬웠나요?')).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toHaveValue('추가 상세 내용입니다.');
+    });
+
+    it('기존 평가에 사유 태그가 포함된 경우 수정 폼을 열었을 때 해당 사유 칩이 선택 상태로 복원된다', () => {
+      const existingWithReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 2,
+        comment: '[환각/사실 오류] 문서 3페이지 내용과 다릅니다.',
+      };
+      render(<AnswerFeedback existing={existingWithReasons} onSubmit={vi.fn()} />);
+      open();
+
+      expect(screen.getByText('어떤 점이 아쉬웠나요?')).toBeInTheDocument();
+      const hallucinationChip = screen.getByRole('button', { name: '환각/사실 오류' });
+      expect(hallucinationChip).toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue(
+        '[환각/사실 오류] 문서 3페이지 내용과 다릅니다.',
+      );
+    });
+  });
 });
 

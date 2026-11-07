@@ -2230,6 +2230,83 @@
   cursor: not-allowed;
 }
 
+/* ── 피드백 불만족 사유 칩 및 질문 보완 (SPEC-095) ── */
+.feedback-reasons-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.feedback-reasons-title {
+  font-size: 0.75rem;
+  color: hsl(210, 12%, 68%);
+}
+
+.feedback-reasons-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.feedback-reason-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  color: hsl(210, 12%, 70%);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.feedback-reason-chip:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  color: hsl(210, 20%, 90%);
+}
+
+.feedback-reason-chip.selected {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: #6366f1;
+  color: #c7d2fe;
+  font-weight: 500;
+}
+
+.btn-feedback-refine {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #c7d2fe;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.btn-feedback-refine:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+
+.btn-feedback-refine:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── 청크 열람 모달 (SPEC-083) ── */
 .chunks-modal {
   width: min(720px, 92vw);

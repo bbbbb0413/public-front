@@ -9081,4 +9081,339 @@ describe('AiService Component', () => {
       expect(input).toHaveFocus();
     });
   });
+
+  describe('답변 평가 피드백 및 질문 보완 재질문 연계 (SPEC-095)', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      updateProfile: vi.fn(),
+      refreshAuth: vi.fn(),
+    };
+
+    it('정확도 1~2점으로 평가된 답변 버블에 [질문 보완하여 다시 질문] 버튼이 노출되고, 클릭 시 직전 사용자 질문이 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-low', title: '저평가 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-low',
+        title: '저평가 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '환각이 발생한 원래 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '부정확한 답변 내용', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-low',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[환각/사실 오류] 내용이 틀렸습니다',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('저평가 세션'));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      expect(refineBtn).toBeInTheDocument();
+      expect(refineBtn).toHaveClass('btn-feedback-refine');
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      expect(input.value).toBe('');
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('환각이 발생한 원래 질문');
+      expect(input).toHaveFocus();
+    });
+
+    it('답변 스트리밍 중일 때는 [질문 보완하여 다시 질문] 버튼이 disabled 상태가 된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-low2', title: '저평가 세션 2', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-low2',
+        title: '저평가 세션 2',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '첫 번째 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '첫 번째 답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-low2',
+          turnIndex: 1,
+          accuracy: 2,
+          helpfulness: 2,
+          comment: '불만족',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      // 스트리밍을 종료하지 않고 유지
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        const onMessage = args[1];
+        setTimeout(() => {
+          onMessage('스트리밍 생성 중...');
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('저평가 세션 2'));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      expect(refineBtn).not.toBeDisabled();
+
+      // 새 질문 전송하여 스트리밍 시작
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '두 번째 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      expect(refineBtn).toBeDisabled();
+    });
+
+    it('인라인 에러 버블이 포함된 대화 내역에서 정상 답변 평가 제출 시 올바른 세션 turnIndex가 전송된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValue({
+        sessionId: 'sess-err-recover',
+        turnIndex: 2,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: '[환각/사실 오류]',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+      });
+
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        callCount++;
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onError = args[3];
+        const onSessionCreated = args[8];
+
+        if (callCount === 1) {
+          // 1번째 질문: 에러 발생하여 chatLog에 isError 버블 생성
+          setTimeout(() => {
+            onError?.(new Error('스트리밍 서버 오류'));
+          }, 10);
+        } else {
+          // 2번째 질문: 성공 (세션 ID 발급)
+          setTimeout(() => {
+            onSessionCreated?.('sess-err-recover');
+            onMessage('정상 답변 텍스트');
+            onDone?.({ confidence: 0.9, missing: [] });
+          }, 10);
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1번째 질문 전송 -> 실패
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '실패할 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 에러 버블 확인
+      expect(screen.getAllByText('답변을 생성하지 못했습니다.').length).toBeGreaterThanOrEqual(1);
+
+      // 2번째 질문 전송 -> 성공
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '성공할 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      expect(screen.getAllByText('정상 답변 텍스트').length).toBeGreaterThanOrEqual(1);
+
+      // 정상 답변의 평가하기 클릭
+      const evalBtn = screen.getByRole('button', { name: '이 답변을 평가하기' });
+      await act(async () => {
+        fireEvent.click(evalBtn);
+      });
+
+      // 정확도 1점, 유용성 1점 선택
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 1점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 1점/));
+      });
+
+      // 사유 칩 선택
+      const hallucinationChip = screen.getByRole('button', { name: '환각/사실 오류' });
+      await act(async () => {
+        fireEvent.click(hallucinationChip);
+      });
+
+      // 평가 제출 클릭
+      const submitBtn = screen.getByRole('button', { name: '평가 제출' });
+      await act(async () => {
+        fireEvent.click(submitBtn);
+      });
+
+      // chatLog에는:
+      // [0]: user('실패할 질문')
+      // [1]: ai(isError: true)
+      // [2]: user('성공할 질문')
+      // [3]: ai(정상 답변)
+      // 단순 idx는 3이지만, isError 버블을 제외한 실제 세션 turnIndex는:
+      // user('실패할 질문'): 0
+      // user('성공할 질문'): 1
+      // ai(정상 답변): 2
+      // 따라서 turnIndex는 2여야 함!
+      expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+        sessionId: 'sess-err-recover',
+        turnIndex: 2,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: '[환각/사실 오류]',
+      });
+    });
+
+    it('인라인 에러 버블이 포함된 대화 내역에서 정상 답변 보관(★ 보관) 클릭 시 올바른 세션 turnIndex가 전송된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.createBookmark).mockResolvedValue({
+        id: 'bm-1',
+        sessionId: 'sess-err-bm',
+        turnIndex: 2,
+        createdAt: '2026-08-28T01:00:00Z',
+      });
+
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        callCount++;
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onError = args[3];
+        const onSessionCreated = args[8];
+
+        if (callCount === 1) {
+          // 1번째 질문: 에러 발생하여 chatLog에 isError 버블 생성
+          setTimeout(() => {
+            onError?.(new Error('스트리밍 서버 오류'));
+          }, 10);
+        } else {
+          // 2번째 질문: 성공 (세션 ID 발급)
+          setTimeout(() => {
+            onSessionCreated?.('sess-err-bm');
+            onMessage('정상 답변 텍스트입니다');
+            onDone?.({ confidence: 0.9, missing: [] });
+          }, 10);
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1번째 질문 전송 -> 실패
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '실패할 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 2번째 질문 전송 -> 성공
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '성공할 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 정상 답변의 [★ 보관] 버튼 클릭
+      const bookmarkBtn = screen.getByRole('button', { name: '답변 보관' });
+      await act(async () => {
+        fireEvent.click(bookmarkBtn);
+      });
+
+      // 보관 모달 확인 및 저장
+      const confirmSaveBtn = screen.getByRole('button', { name: '보관하기' });
+      await act(async () => {
+        fireEvent.click(confirmSaveBtn);
+      });
+
+      expect(aiApi.createBookmark).toHaveBeenCalledWith({
+        sessionId: 'sess-err-bm',
+        turnIndex: 2,
+        note: undefined,
+      });
+    });
+  });
 });
