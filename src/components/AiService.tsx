@@ -61,7 +61,23 @@ interface ChatMessage {
 }
 
 const getSessionTurnIndex = (chatLog: ChatMessage[], index: number): number => {
-  return chatLog.slice(0, index + 1).filter((m) => !m.isError).length - 1;
+  const excludedIndices = new Set<number>();
+  chatLog.forEach((msg, i) => {
+    if (msg.isError) {
+      excludedIndices.add(i);
+      if (i > 0 && chatLog[i - 1]?.sender === 'user') {
+        excludedIndices.add(i - 1);
+      }
+    }
+  });
+
+  let validCount = 0;
+  for (let i = 0; i <= index; i++) {
+    if (!excludedIndices.has(i)) {
+      validCount++;
+    }
+  }
+  return validCount - 1;
 };
 
 const STEP_LABELS: Record<string, string> = {

@@ -9317,14 +9317,13 @@ describe('AiService Component', () => {
       // [1]: ai(isError: true)
       // [2]: user('성공할 질문')
       // [3]: ai(정상 답변)
-      // 단순 idx는 3이지만, isError 버블을 제외한 실제 세션 turnIndex는:
-      // user('실패할 질문'): 0
-      // user('성공할 질문'): 1
-      // ai(정상 답변): 2
-      // 따라서 turnIndex는 2여야 함!
+      // 백엔드는 실패한 질문과 에러 응답을 세션 turns에 영속화하지 않으므로 실제 세션 turnIndex는:
+      // user('성공할 질문'): 0
+      // ai(정상 답변): 1
+      // 따라서 turnIndex는 1이어야 함!
       expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
         sessionId: 'sess-err-recover',
-        turnIndex: 2,
+        turnIndex: 1,
         accuracy: 1,
         helpfulness: 1,
         comment: '[환각/사실 오류]',
@@ -9337,7 +9336,7 @@ describe('AiService Component', () => {
       vi.mocked(aiApi.createBookmark).mockResolvedValue({
         id: 'bm-1',
         sessionId: 'sess-err-bm',
-        turnIndex: 2,
+        turnIndex: 1,
         createdAt: '2026-08-28T01:00:00Z',
       });
 
@@ -9411,7 +9410,7 @@ describe('AiService Component', () => {
 
       expect(aiApi.createBookmark).toHaveBeenCalledWith({
         sessionId: 'sess-err-bm',
-        turnIndex: 2,
+        turnIndex: 1,
         note: undefined,
       });
     });
@@ -9532,7 +9531,7 @@ describe('AiService Component', () => {
       vi.mocked(aiApi.getSessions).mockResolvedValue([]);
       vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValue({
         sessionId: 'sess-multi-err',
-        turnIndex: 3,
+        turnIndex: 1,
         accuracy: 1,
         helpfulness: 1,
         createdAt: '2026-08-28T01:00:00Z',
@@ -9620,6 +9619,111 @@ describe('AiService Component', () => {
 
       expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
         sessionId: 'sess-multi-err',
+        turnIndex: 1,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: undefined,
+      });
+    });
+
+    it('QA 4: 이전 정상 턴이 존재하는 세션에서 질문 실패 후 새 질문 성공 시 올바른 turnIndex(3)가 전송된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-prev-exist', title: '기존 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-prev-exist',
+        title: '기존 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '기존 사용자 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '기존 답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValue({
+        sessionId: 'sess-prev-exist',
+        turnIndex: 3,
+        accuracy: 1,
+        helpfulness: 1,
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+      });
+
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        callCount++;
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onError = args[3];
+
+        if (callCount === 1) {
+          setTimeout(() => onError?.(new Error('네트워크 오류')), 10);
+        } else {
+          setTimeout(() => {
+            onMessage('에러 후 재시도 성공 답변');
+            onDone?.({ confidence: 0.9, missing: [] });
+          }, 10);
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('기존 세션'));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 실패할 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '실패 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 성공할 질문 전송
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '성공 질문' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 2번째(새) 정상 답변 평가하기 클릭
+      const evalButtons = screen.getAllByRole('button', { name: '이 답변을 평가하기' });
+      // 첫 번째 답변과 두 번째 답변 각각 있으므로 마지막 버튼 클릭
+      await act(async () => {
+        fireEvent.click(evalButtons[evalButtons.length - 1]);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 1점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 1점/));
+      });
+
+      const submitBtn = screen.getByRole('button', { name: '평가 제출' });
+      await act(async () => {
+        fireEvent.click(submitBtn);
+      });
+
+      // 기존 턴 [0, 1] + 실패 질문/에러 제외 + 새 질문[2] + 새 답변[3] -> turnIndex: 3
+      expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+        sessionId: 'sess-prev-exist',
         turnIndex: 3,
         accuracy: 1,
         helpfulness: 1,
