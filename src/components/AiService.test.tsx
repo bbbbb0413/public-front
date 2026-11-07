@@ -9415,5 +9415,216 @@ describe('AiService Component', () => {
         note: undefined,
       });
     });
+
+    it('QA 1: 정확도 3점 이상으로 평가되었거나 평가되지 않은 답변 버블에는 [질문 보완하여 다시 질문] 버튼이 렌더링되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-high', title: '고평가 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-high',
+        title: '고평가 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 내용', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '고평가된 답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-high',
+          turnIndex: 1,
+          accuracy: 4,
+          helpfulness: 4,
+          comment: '좋은 답변',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('고평가 세션'));
+      });
+
+      expect(
+        screen.queryByRole('button', { name: '질문 보완하여 다시 질문' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('QA 2: 복수 턴 대화에서 특정 저평가 턴의 [질문 보완하여 다시 질문] 클릭 시 해당 답변의 직전 사용자 질문이 정확히 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-multi', title: '복수 턴 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-multi',
+        title: '복수 턴 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '첫 번째 사용자 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '첫 번째 답변', createdAt: '2026-08-28T01:00:01Z' },
+          {
+            role: 'user',
+            content: '두 번째 사용자 질문(저평가 대상)',
+            createdAt: '2026-08-28T01:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '두 번째 답변(오류 발생)',
+            createdAt: '2026-08-28T01:00:03Z',
+          },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-multi',
+          turnIndex: 3,
+          accuracy: 2,
+          helpfulness: 1,
+          comment: '[환각/사실 오류] 잘못됨',
+          createdAt: '2026-08-28T01:00:04Z',
+          updatedAt: '2026-08-28T01:00:04Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복수 턴 세션'));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      expect(refineBtn).toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      expect(input.value).toBe('');
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('두 번째 사용자 질문(저평가 대상)');
+      expect(input).toHaveFocus();
+    });
+
+    it('QA 3: 연속된 복수의 에러 버블이 포함된 대화 내역에서도 정상 답변 피드백 제출 시 올바른 turnIndex가 전송된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValue({
+        sessionId: 'sess-multi-err',
+        turnIndex: 3,
+        accuracy: 1,
+        helpfulness: 1,
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+      });
+
+      let callCount = 0;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        callCount++;
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onError = args[3];
+        const onSessionCreated = args[8];
+
+        if (callCount === 1) {
+          setTimeout(() => onError?.(new Error('첫 번째 오류')), 10);
+        } else if (callCount === 2) {
+          setTimeout(() => onError?.(new Error('두 번째 오류')), 10);
+        } else {
+          setTimeout(() => {
+            onSessionCreated?.('sess-multi-err');
+            onMessage('두 번 에러 후 세 번째 성공 답변');
+            onDone?.({ confidence: 0.9, missing: [] });
+          }, 10);
+        }
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+
+      // 1번째 실패
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '실패 질문 1' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 2번째 실패
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '실패 질문 2' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 3번째 성공
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '성공 질문 3' } });
+        fireEvent.click(sendBtn);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 정상 답변 평가하기 클릭
+      const evalBtn = screen.getByRole('button', { name: '이 답변을 평가하기' });
+      await act(async () => {
+        fireEvent.click(evalBtn);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 1점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 1점/));
+      });
+
+      const submitBtn = screen.getByRole('button', { name: '평가 제출' });
+      await act(async () => {
+        fireEvent.click(submitBtn);
+      });
+
+      expect(aiApi.submitAnswerFeedback).toHaveBeenCalledWith({
+        sessionId: 'sess-multi-err',
+        turnIndex: 3,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: undefined,
+      });
+    });
   });
 });

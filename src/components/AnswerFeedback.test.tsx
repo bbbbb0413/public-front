@@ -385,6 +385,89 @@ describe('AnswerFeedback', () => {
         '[환각/사실 오류] 문서 3페이지 내용과 다릅니다.',
       );
     });
+
+    it('QA 1: 정확도 2점 선택 시에도 5개 사유 칩이 노출되고, 2점에서 1점으로 변경 시 선택된 사유 칩이 유지된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+
+      pick('정확도', 2);
+      expect(screen.getByText('어떤 점이 아쉬웠나요?')).toBeInTheDocument();
+      const reasonChips = [
+        '환각/사실 오류',
+        '근거 문서와 다름',
+        '질문 의도와 무관',
+        '내용 불완전/부족',
+        '최신 정보 아님',
+      ];
+      for (const reason of reasonChips) {
+        expect(screen.getByRole('button', { name: reason })).toBeInTheDocument();
+      }
+
+      fireEvent.click(screen.getByRole('button', { name: '질문 의도와 무관' }));
+      expect(screen.getByRole('button', { name: '질문 의도와 무관' })).toHaveClass('selected');
+
+      // 2점에서 1점으로 변경해도 사유 칩 영역과 선택 상태 유지
+      pick('정확도', 1);
+      expect(screen.getByText('어떤 점이 아쉬웠나요?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '질문 의도와 무관' })).toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue('[질문 의도와 무관]');
+    });
+
+    it('QA 2: 본문 의견을 직접 작성한 후 사유 칩을 추가하거나 해제해도 본문 내용이 유지된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+      pick('정확도', 1);
+
+      fireEvent.click(screen.getByRole('button', { name: '환각/사실 오류' }));
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: '[환각/사실 오류] 사용자가 직접 작성한 상세 코멘트' },
+      });
+
+      // 다른 칩 추가
+      fireEvent.click(screen.getByRole('button', { name: '최신 정보 아님' }));
+      expect(screen.getByRole('textbox')).toHaveValue(
+        '[환각/사실 오류] [최신 정보 아님] 사용자가 직접 작성한 상세 코멘트',
+      );
+
+      // 환각/사실 오류 해제
+      fireEvent.click(screen.getByRole('button', { name: '환각/사실 오류' }));
+      expect(screen.getByRole('textbox')).toHaveValue(
+        '[최신 정보 아님] 사용자가 직접 작성한 상세 코멘트',
+      );
+    });
+
+    it('QA 3: 정확도를 3점(보통)으로 변경 시 사유 칩 영역이 숨겨지고 사유 태그 접두사가 제거된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} />);
+      open();
+      pick('정확도', 2);
+
+      fireEvent.click(screen.getByRole('button', { name: '내용 불완전/부족' }));
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: '[내용 불완전/부족] 더 많은 예시가 필요합니다.' },
+      });
+
+      pick('정확도', 3);
+      expect(screen.queryByText('어떤 점이 아쉬웠나요?')).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toHaveValue('더 많은 예시가 필요합니다.');
+    });
+
+    it('QA 4: 복수의 사유 태그가 포함된 기존 평가를 수정할 때 모든 해당 사유 칩이 선택 상태로 복원된다', () => {
+      const existingWithMultipleReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 1,
+        comment: '[환각/사실 오류] [최신 정보 아님] 사실과 다르고 구버전 정보입니다.',
+      };
+      render(<AnswerFeedback existing={existingWithMultipleReasons} onSubmit={vi.fn()} />);
+      open();
+
+      expect(screen.getByText('어떤 점이 아쉬웠나요?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '환각/사실 오류' })).toHaveClass('selected');
+      expect(screen.getByRole('button', { name: '최신 정보 아님' })).toHaveClass('selected');
+      expect(screen.getByRole('button', { name: '근거 문서와 다름' })).not.toHaveClass('selected');
+      expect(screen.getByRole('textbox')).toHaveValue(
+        '[환각/사실 오류] [최신 정보 아님] 사실과 다르고 구버전 정보입니다.',
+      );
+    });
   });
 });
 
