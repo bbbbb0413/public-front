@@ -1187,7 +1187,8 @@
   border-radius: 3px;
 }
 
-.source-ref-view-btn {
+.source-ref-view-btn,
+.btn-view-doc-chunks {
   align-self: flex-start;
   background: none;
   border: none;
@@ -1199,11 +1200,13 @@
   text-decoration: underline;
 }
 
-.source-ref-view-btn:hover {
+.source-ref-view-btn:hover,
+.btn-view-doc-chunks:hover {
   color: #a5b4fc;
 }
 
-.source-ref-view-btn:disabled {
+.source-ref-view-btn:disabled,
+.btn-view-doc-chunks:disabled {
   color: #6b7280;
   cursor: default;
   text-decoration: none;
