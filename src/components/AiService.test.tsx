@@ -10120,5 +10120,203 @@ describe('AiService Component', () => {
       expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
       expect(screen.getByText(/"stream_doc.pdf" 청크 목록/)).toBeInTheDocument();
     });
+
+    it('Given 세션 복원으로 과거 대화 내역을 불러온 상황에서 When AI 메시지의 출처 목록을 확인하면 Then 1-based 청크 번호와 [청크 목록] 버튼이 정상 노출되고 클릭 시 청크 모달이 정상 동작한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-restore-096', title: '복원 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunks);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-restore-096',
+        title: '복원 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '복원 세션 질문입니다',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '복원 세션 답변입니다',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'restored_manual.pdf',
+                chunkIndex: 2, // 0-based 2 -> 1-based #3
+                documentId: 'doc-restored-99',
+                snippet: '복원 매뉴얼 청크',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바에서 과거 대화 세션 클릭 (handleLoadSession 트리거)
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복원 세션'));
+      });
+
+      // 출처 그룹 확인 및 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /restored_manual\.pdf/i });
+      expect(docToggleBtn).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 1-based 청크 번호(청크 #3) 표시 확인
+      expect(screen.getByText('청크 #3')).toBeInTheDocument();
+      expect(screen.queryByText('청크 2')).not.toBeInTheDocument();
+
+      // [청크 목록] 버튼 확인 및 클릭
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      expect(viewChunksBtn).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      // 모달 정상 열림 및 getDocumentChunks 호출 확인
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-restored-99');
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText(/"restored_manual.pdf" 청크 목록/)).toBeInTheDocument();
+    });
+
+    it('QA 1: Given 청크 목록 API 호출 실패 시 When 청크 열람 모달을 확인하면 에러 메시지가 표시되고 모달 닫기 시 상태가 초기화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-err-096', title: '에러 테스트 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockRejectedValue(new Error('네트워크 오류'));
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-err-096',
+        title: '에러 테스트 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'error_doc.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-err-1',
+                snippet: '스니펫',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('에러 테스트 세션'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+
+      // 에러 메시지 렌더링 확인
+      expect(screen.getByText('청크 목록을 불러오지 못했습니다.')).toBeInTheDocument();
+
+      // 모달 닫기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 모달 닫기' }));
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('QA 2: Given 색인된 청크가 0건인 출처 문서에 대해 When [청크 목록] 클릭 시 총 0개 및 빈 목록 메시지가 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-empty-096', title: '빈 청크 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue([]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-empty-096',
+        title: '빈 청크 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'empty_doc.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-empty-1',
+                snippet: '스니펫',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('빈 청크 세션'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+
+      // 총 0개 헤더 및 빈 상태 문구 확인
+      expect(screen.getByText(/총 0개/)).toBeInTheDocument();
+      expect(screen.getByText('색인된 청크가 없습니다.')).toBeInTheDocument();
+    });
   });
 });
