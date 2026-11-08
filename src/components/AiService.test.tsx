@@ -9731,4 +9731,394 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('AI Answer Source Citation Chunks & Modal (SPEC-096)', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-spec-096', nickName: 'Tester96' },
+      token: 'mock-token-96',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    const mockChunks: aiApi.DocumentChunk[] = [
+      {
+        chunkIndex: 0,
+        text: '첫 번째 색인 청크 내용입니다.',
+      },
+      {
+        chunkIndex: 1,
+        text: '두 번째 색인 청크 내용입니다.',
+      },
+    ];
+
+    it('Given AI 답변 버블에 참고 문서가 있을 때 When 출처를 펼치면 Then 청크 번호가 1-based(청크 #1, 청크 #2)로 표시되고 [청크 목록] 버튼이 렌더링된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-096', title: '출처 테스트 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-096',
+        title: '출처 테스트 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '환불 규정 알려줘',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '환불은 7일 이내 가능합니다.',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'refund_policy.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-refund-01',
+                snippet: '환불 규정 제1조',
+                score: 0.95,
+              },
+              {
+                fileName: 'refund_policy.pdf',
+                chunkIndex: 1,
+                documentId: 'doc-refund-01',
+                snippet: '환불 규정 제2조',
+                score: 0.88,
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 채팅 패널 열기 및 세션 선택
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('출처 테스트 세션'));
+      });
+
+      // 문서 그룹 토글 버튼 및 [청크 목록] 버튼 확인
+      const docToggleBtn = screen.getByRole('button', { name: /refund_policy\.pdf/i });
+      expect(docToggleBtn).toBeInTheDocument();
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      expect(viewChunksBtn).toBeInTheDocument();
+      expect(viewChunksBtn).toHaveClass('btn-view-doc-chunks');
+
+      // 펼치기 전에는 청크 번호 미노출
+      expect(screen.queryByText('청크 #1')).not.toBeInTheDocument();
+      expect(screen.queryByText('청크 #2')).not.toBeInTheDocument();
+
+      // 출처 그룹 펼치기
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 1-based 표기(청크 #1, 청크 #2)로 렌더링 확인 (0-based '청크 0'이 아니어야 함)
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+      expect(screen.getByText('청크 #2')).toBeInTheDocument();
+      expect(screen.queryByText('청크 0')).not.toBeInTheDocument();
+      expect(screen.queryByText('청크 1')).not.toBeInTheDocument();
+    });
+
+    it('Given 참고 문서 그룹에 [청크 목록] 버튼이 있을 때 When 클릭하면 getDocumentChunks가 호출되고 청크 열람 모달이 열린다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-096-modal', title: '청크 모달 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunks);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-096-modal',
+        title: '청크 모달 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'guide.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-guide-99',
+                snippet: '가이드 스니펫',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('청크 모달 세션'));
+      });
+
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-guide-99');
+
+      const modal = screen.getByRole('dialog', { name: /청크 목록/i });
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText(/"guide.pdf" 청크 목록/)).toBeInTheDocument();
+      expect(screen.getByText('첫 번째 색인 청크 내용입니다.')).toBeInTheDocument();
+      expect(screen.getByText('두 번째 색인 청크 내용입니다.')).toBeInTheDocument();
+    });
+
+    it('Given 출처를 통해 청크 모달이 열린 상태에서 When 닫기 버튼, 하단 닫기, 오버레이 클릭, Escape 키 입력 시 모달이 닫힌다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-096-close', title: '닫기 테스트 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunks);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-096-close',
+        title: '닫기 테스트 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'terms.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-terms-01',
+                snippet: '약관 내용',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('닫기 테스트 세션'));
+      });
+
+      // 1. 상단 닫기(✕) 버튼 클릭으로 닫기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 모달 닫기' }));
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 2. 하단 [닫기] 버튼 클릭으로 닫기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      const bottomCloseBtn = screen.getByRole('button', { name: '닫기' });
+      await act(async () => {
+        fireEvent.click(bottomCloseBtn);
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 3. 오버레이 클릭으로 닫기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      const overlay = screen.getByTestId('chunks-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 4. Escape 키 입력으로 닫기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+    });
+
+    it('Given 출처 정보에 chunkCount가 없을 때 When 청크 목록 2건이 로드되면 모달 헤더에 총 2개로 표시된다 (경계 케이스)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-096-count', title: '카운트 테스트 세션', updatedAt: '2026-11-09T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunks);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-096-count',
+        title: '카운트 테스트 세션',
+        createdAt: '2026-11-09T00:00:00Z',
+        updatedAt: '2026-11-09T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-09T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-09T00:00:01Z',
+            sources: [
+              {
+                fileName: 'no_count.pdf',
+                chunkIndex: 0,
+                documentId: 'doc-no-count',
+                snippet: '스니펫',
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('카운트 테스트 세션'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+
+      // mockChunks가 2개 로드되었으므로 총 2개 표시
+      expect(screen.getByText(/총 2개/)).toBeInTheDocument();
+    });
+
+    it('Given 스트리밍 진행 중 실시간 출처가 수신될 때 When 출처 목록을 확인하면 1-based 청크 번호와 [청크 목록] 버튼이 제공된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunks);
+
+      let capturedOnSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        capturedOnSources = args[6];
+        return {
+          cancel: vi.fn(),
+        } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 채팅창 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 질문 전송
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/);
+      const sendBtn = screen.getByRole('button', { name: '전송' });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '스트리밍 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 스트리밍 도중 출처 수신
+      expect(capturedOnSources).toBeDefined();
+      await act(async () => {
+        capturedOnSources!([
+          {
+            fileName: 'stream_doc.pdf',
+            chunkIndex: 0,
+            documentId: 'doc-stream-1',
+            snippet: '스트리밍 스니펫',
+          },
+        ]);
+      });
+
+      // 스트리밍 중인 버블에 [청크 목록] 버튼 렌더링 확인
+      const streamChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      expect(streamChunksBtn).toBeInTheDocument();
+      expect(streamChunksBtn).toHaveClass('btn-view-doc-chunks');
+
+      // 펼치기 전 클릭
+      const docToggleBtn = screen.getByRole('button', { name: /stream_doc\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 1-based 표기(청크 #1) 확인
+      expect(screen.getByText('청크 #1')).toBeInTheDocument();
+      expect(screen.queryByText('청크 0')).not.toBeInTheDocument();
+
+      // [청크 목록] 클릭 시 모달 열림 검증
+      await act(async () => {
+        fireEvent.click(streamChunksBtn);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-stream-1');
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText(/"stream_doc.pdf" 청크 목록/)).toBeInTheDocument();
+    });
+  });
 });

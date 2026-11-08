@@ -198,7 +198,9 @@ export const AiService = () => {
   const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
 
-  const [viewingChunksDoc, setViewingChunksDoc] = useState<DocumentInfo | null>(null);
+  const [viewingChunksDoc, setViewingChunksDoc] = useState<
+    DocumentInfo | { id: string; fileName: string; chunkCount?: number } | null
+  >(null);
   const [chunks, setChunks] = useState<DocumentChunk[]>([]);
   const [isLoadingChunks, setIsLoadingChunks] = useState<boolean>(false);
   const [chunksError, setChunksError] = useState<string | null>(null);
@@ -682,7 +684,9 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingSession, isDeletingSession]);
 
-  const handleOpenChunks = async (doc: DocumentInfo) => {
+  const handleOpenChunks = async (
+    doc: DocumentInfo | { id: string; fileName: string; chunkCount?: number },
+  ) => {
     setViewingChunksDoc(doc);
     setIsLoadingChunks(true);
     setChunksError(null);
@@ -1690,13 +1694,26 @@ export const AiService = () => {
                                       >
                                         {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
                                       </button>
+                                      <button
+                                        type="button"
+                                        className="btn-view-doc-chunks"
+                                        onClick={() =>
+                                          handleOpenChunks({
+                                            id: group.documentId,
+                                            fileName: group.fileName,
+                                            chunkCount: (group as { chunkCount?: number }).chunkCount,
+                                          })
+                                        }
+                                      >
+                                        청크 목록
+                                      </button>
                                       {isExpanded && (
                                         <ul className="source-group-chunks">
                                           {group.chunks.map((chunk) => (
                                             <li key={chunk.chunkIndex} className="source-chunk-item">
                                               <div className="source-chunk-meta">
                                                 <span className="source-ref-chunk">
-                                                  청크 {chunk.chunkIndex}
+                                                  청크 #{chunk.chunkIndex + 1}
                                                 </span>
                                                 {typeof chunk.score === 'number' && (
                                                   <span className="source-ref-score">
@@ -1847,13 +1864,26 @@ export const AiService = () => {
                                   >
                                     {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
                                   </button>
+                                  <button
+                                    type="button"
+                                    className="btn-view-doc-chunks"
+                                    onClick={() =>
+                                      handleOpenChunks({
+                                        id: group.documentId,
+                                        fileName: group.fileName,
+                                        chunkCount: (group as { chunkCount?: number }).chunkCount,
+                                      })
+                                    }
+                                  >
+                                    청크 목록
+                                  </button>
                                   {isExpanded && (
                                     <ul className="source-group-chunks">
                                       {group.chunks.map((chunk) => (
                                         <li key={chunk.chunkIndex} className="source-chunk-item">
                                           <div className="source-chunk-meta">
                                             <span className="source-ref-chunk">
-                                              청크 {chunk.chunkIndex}
+                                              청크 #{chunk.chunkIndex + 1}
                                             </span>
                                             {typeof chunk.score === 'number' && (
                                               <span className="source-ref-score">
@@ -2056,7 +2086,13 @@ export const AiService = () => {
                 <h3 id="chunks-modal-title" className="chunks-modal-title">
                   "{viewingChunksDoc.fileName}" 청크 목록
                 </h3>
-                <span className="chunks-modal-count">총 {viewingChunksDoc.chunkCount}개</span>
+                <span className="chunks-modal-count">
+                  총{' '}
+                  {viewingChunksDoc.chunkCount !== undefined
+                    ? viewingChunksDoc.chunkCount
+                    : chunks.length}
+                  개
+                </span>
               </div>
               <button
                 type="button"
