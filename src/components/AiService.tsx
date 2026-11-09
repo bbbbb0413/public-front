@@ -802,6 +802,24 @@ export const AiService = () => {
     setCurrentSources([]);
     setExpandedGroups({});
     setCurrentProgress(null);
+    setViewingFileKeys((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith('streaming-')) {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+    setFileViewErrors((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith('streaming-')) {
+          delete next[key];
+        }
+      });
+      return next;
+    });
 
     let accumulated = '';
     let lastProgress: AgentProgress | null = null;

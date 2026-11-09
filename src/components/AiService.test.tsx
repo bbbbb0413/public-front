@@ -10913,5 +10913,88 @@ describe('AiService Component', () => {
 
       expect(capturedAnchor.download).toBe('single-click.pdf');
     });
+
+    it('QA 3: Given 첫 번째 스트리밍 중 출처의 원문 조회가 실패했을 때 When 새 질문을 스트리밍하고 동일 문서가 다시 인용되면 Then 새 스트리밍 버블에 이전 에러가 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'reused-doc.pdf', chunkIndex: 0, documentId: 'doc-reused', score: 0.9 },
+      ];
+
+      let stream1Done: () => void;
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('첫 번째 스트리밍 답변');
+          }, 10);
+          stream1Done = onDone;
+          return Promise.resolve();
+        },
+      );
+
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Stream 1 file error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문 1' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 스트리밍 버블의 [원문 보기] 클릭 -> 실패
+      const streamViewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(streamViewBtn);
+      });
+
+      // 스트리밍 버블에 에러 노출 확인
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
+
+      // 스트림 1 완료 -> chatLog로 이전됨
+      await act(async () => {
+        stream1Done!();
+      });
+
+      // 두 번째 질문 스트리밍 설정 (동일 문서 출처 인용)
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, _onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('두 번째 스트리밍 진행 중...');
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문 2' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 새 스트리밍 버블 확인
+      const streamingBubble = document.querySelector('.message-bubble.streaming');
+      expect(streamingBubble).not.toBeNull();
+      // 새 스트리밍 버블 내 출처에 이전 에러가 노출되지 않아야 함
+      expect(streamingBubble?.querySelector('.source-ref-file-error')).toBeNull();
+      // [원문 보기] 버튼도 disabled 상태가 아니어야 함
+      const newStreamViewBtn = streamingBubble?.querySelector('.source-ref-view-btn');
+      expect(newStreamViewBtn).not.toBeDisabled();
+      expect(newStreamViewBtn).toHaveTextContent('원문 보기');
+    });
   });
 });
