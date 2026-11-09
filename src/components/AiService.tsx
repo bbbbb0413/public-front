@@ -182,8 +182,8 @@ export const AiService = () => {
   const [isSavingBookmark, setIsSavingBookmark] = useState(false);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [viewingFileId, setViewingFileId] = useState<string | null>(null);
-  const [fileViewError, setFileViewError] = useState<string | null>(null);
+  const [viewingFileKeys, setViewingFileKeys] = useState<Record<string, boolean>>({});
+  const [fileViewErrors, setFileViewErrors] = useState<Record<string, string>>({});
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [feedbackByTurn, setFeedbackByTurn] = useState<Record<number, AnswerFeedbackOut>>({});
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -380,25 +380,32 @@ export const AiService = () => {
       .sort((a, b) => (b.maxScore ?? -Infinity) - (a.maxScore ?? -Infinity));
   };
 
-  const handleViewSourceFile = async (documentId: string) => {
-    if (viewingFileId) return;
-    setViewingFileId(documentId);
-    setFileViewError(null);
-    const newTab = window.open('', '_blank');
+  const handleViewSourceFile = async (documentId: string, fileName: string, groupKey: string) => {
+    if (viewingFileKeys[groupKey]) return;
+    setViewingFileKeys((prev) => ({ ...prev, [groupKey]: true }));
+    setFileViewErrors((prev) => {
+      if (!prev[groupKey]) return prev;
+      const next = { ...prev };
+      delete next[groupKey];
+      return next;
+    });
     try {
       const blob = await getDocumentFile(documentId);
       const url = URL.createObjectURL(blob);
-      if (newTab) {
-        newTab.location.href = url;
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer');
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch {
-      newTab?.close();
-      setFileViewError('원본 파일을 불러오는 데 실패했습니다.');
+      setFileViewErrors((prev) => ({
+        ...prev,
+        [groupKey]: '원본 파일을 불러오는 데 실패했습니다.',
+      }));
     } finally {
-      setViewingFileId(null);
+      setViewingFileKeys((prev) => ({ ...prev, [groupKey]: false }));
     }
   };
 
@@ -409,6 +416,8 @@ export const AiService = () => {
     streamingAnswerRef.current = '';
     setCurrentSources([]);
     setExpandedGroups({});
+    setViewingFileKeys({});
+    setFileViewErrors({});
     setCurrentProgress(null);
     setCopiedIndex(null);
     setFeedbackByTurn({});
@@ -466,6 +475,8 @@ export const AiService = () => {
       streamingAnswerRef.current = '';
       setCurrentSources([]);
       setExpandedGroups({});
+      setViewingFileKeys({});
+      setFileViewErrors({});
       setCurrentProgress(null);
       setCopiedIndex(null);
     } catch {
@@ -1689,10 +1700,10 @@ export const AiService = () => {
                                       <button
                                         type="button"
                                         className="source-ref-view-btn"
-                                        onClick={() => handleViewSourceFile(group.documentId)}
-                                        disabled={viewingFileId === group.documentId}
+                                        onClick={() => handleViewSourceFile(group.documentId, group.fileName, groupKey)}
+                                        disabled={viewingFileKeys[groupKey]}
                                       >
-                                        {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
+                                        {viewingFileKeys[groupKey] ? '불러오는 중…' : '원문 보기'}
                                       </button>
                                       <button
                                         type="button"
@@ -1733,15 +1744,15 @@ export const AiService = () => {
                                           ))}
                                         </ul>
                                       )}
+                                      {fileViewErrors[groupKey] && (
+                                        <div className="source-ref-file-error" role="alert">
+                                          {fileViewErrors[groupKey]}
+                                        </div>
+                                      )}
                                     </li>
                                   );
                                 })}
                               </ul>
-                              {fileViewError && (
-                                <div className="source-ref-file-error" role="alert">
-                                  {fileViewError}
-                                </div>
-                              )}
                             </div>
                           )}
                           <div className="message-actions">
@@ -1859,10 +1870,10 @@ export const AiService = () => {
                                   <button
                                     type="button"
                                     className="source-ref-view-btn"
-                                    onClick={() => handleViewSourceFile(group.documentId)}
-                                    disabled={viewingFileId === group.documentId}
+                                    onClick={() => handleViewSourceFile(group.documentId, group.fileName, groupKey)}
+                                    disabled={viewingFileKeys[groupKey]}
                                   >
-                                    {viewingFileId === group.documentId ? '불러오는 중…' : '원문 보기'}
+                                    {viewingFileKeys[groupKey] ? '불러오는 중…' : '원문 보기'}
                                   </button>
                                   <button
                                     type="button"
@@ -1903,15 +1914,15 @@ export const AiService = () => {
                                       ))}
                                     </ul>
                                   )}
+                                  {fileViewErrors[groupKey] && (
+                                    <div className="source-ref-file-error" role="alert">
+                                      {fileViewErrors[groupKey]}
+                                    </div>
+                                  )}
                                 </li>
                               );
                             })}
                           </ul>
-                          {fileViewError && (
-                            <div className="source-ref-file-error" role="alert">
-                              {fileViewError}
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
