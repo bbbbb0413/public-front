@@ -1027,7 +1027,7 @@ describe('AiService Component', () => {
       expect(screen.getByText('관련도 81%')).toBeInTheDocument();
     });
 
-    it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 클릭 시점에 빈 탭을 먼저 열고 파일을 받아온 뒤 그 탭을 원본으로 이동시킨다', async () => {
+    it('Given 출처 목록이 표시된 경우 When "원문 보기" 버튼을 누르면 Then 사전 빈 탭을 열지 않고 파일을 받아온 뒤 앵커 다운로드를 트리거한다 (SPEC-097)', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
       const mockSources: aiApi.SourceRef[] = [
@@ -1044,12 +1044,18 @@ describe('AiService Component', () => {
         createObjectURL: createObjectURLMock,
         revokeObjectURL: revokeObjectURLMock,
       });
-      // 팝업 차단 우회 트릭 검증용: window.open이 location.href를 설정할 수 있는
-      // 가짜 창 객체를 반환하도록 한다(await 이후 window.open을 다시 부르면
-      // 브라우저가 팝업으로 차단할 수 있어, 클릭 시점에 미리 연 탭을 재활용해야 한다).
-      const fakeTab = { location: { href: '' }, close: vi.fn() };
-      const windowOpenMock = vi.fn().mockReturnValue(fakeTab);
+      const windowOpenMock = vi.fn();
       vi.stubGlobal('open', windowOpenMock);
+
+      let capturedAnchor: { href: string; download: string } = { href: '', download: '' };
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        capturedAnchor = {
+          href: this.href,
+          download: this.download,
+        };
+      });
 
       vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
         (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
@@ -1088,15 +1094,19 @@ describe('AiService Component', () => {
         fireEvent.click(viewBtn);
       });
 
-      expect(windowOpenMock).toHaveBeenCalledWith('', '_blank');
+      expect(windowOpenMock).not.toHaveBeenCalled();
       expect(aiApi.getDocumentFile).toHaveBeenCalledWith('d-view');
       expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
-      expect(fakeTab.location.href).toBe('blob:fake-url');
+      expect(clickSpy).toHaveBeenCalled();
+      expect(capturedAnchor.download).toBe('view-me.pdf');
+      expect(capturedAnchor.href).toBe('blob:fake-url');
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:fake-url');
 
+      clickSpy.mockRestore();
       vi.unstubAllGlobals();
     });
 
-    it('Given 원본이 저장되어 있지 않은 문서인 경우 When "원문 보기"를 누르면 Then 채팅 모달 내부에 실패 안내가 보이고 미리 열어둔 탭을 닫는다', async () => {
+    it('Given 원본이 저장되어 있지 않은 문서인 경우 When "원문 보기"를 누르면 Then 해당 출처 그룹에만 국소적으로 실패 안내가 보인다 (SPEC-097)', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
 
       const mockSources: aiApi.SourceRef[] = [
@@ -1105,8 +1115,7 @@ describe('AiService Component', () => {
 
       vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('404'));
 
-      const fakeTab = { location: { href: '' }, close: vi.fn() };
-      const windowOpenMock = vi.fn().mockReturnValue(fakeTab);
+      const windowOpenMock = vi.fn();
       vi.stubGlobal('open', windowOpenMock);
 
       vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
@@ -1146,8 +1155,8 @@ describe('AiService Component', () => {
         fireEvent.click(viewBtn);
       });
 
-      expect(fakeTab.close).toHaveBeenCalled();
-      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다');
+      expect(windowOpenMock).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
 
       vi.unstubAllGlobals();
     });
@@ -10317,6 +10326,675 @@ describe('AiService Component', () => {
       // 총 0개 헤더 및 빈 상태 문구 확인
       expect(screen.getByText(/총 0개/)).toBeInTheDocument();
       expect(screen.getByText('색인된 청크가 없습니다.')).toBeInTheDocument();
+    });
+  });
+
+  describe('AI Answer Source File View and Error Isolation (SPEC-097)', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      loginWithKakao: vi.fn(),
+      loginWithNaver: vi.fn(),
+    };
+
+    let capturedAnchor: { href: string; download: string };
+    let clickSpy: MockInstance;
+    let createObjectURLMock: ReturnType<typeof vi.fn>;
+    let revokeObjectURLMock: ReturnType<typeof vi.fn>;
+    let windowOpenMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      capturedAnchor = { href: '', download: '' };
+      clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        capturedAnchor = {
+          href: this.href,
+          download: this.download,
+        };
+      });
+
+      createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+      revokeObjectURLMock = vi.fn();
+      vi.stubGlobal('URL', {
+        ...URL,
+        createObjectURL: createObjectURLMock,
+        revokeObjectURL: revokeObjectURLMock,
+      });
+
+      windowOpenMock = vi.fn();
+      vi.stubGlobal('open', windowOpenMock);
+    });
+
+    afterEach(() => {
+      clickSpy?.mockRestore?.();
+      vi.unstubAllGlobals();
+    });
+
+    it('AC 1: Given AI 답변 버블의 참고 문서 목록에 특정 문서 출처가 표시되어 있을 때 When 사용자가 해당 문서 행의 [원문 보기] 버튼을 클릭하면 Then 사전 빈 탭이나 팝업 차단 경고창 없이 getDocumentFile API가 호출되고 브라우저 표준 앵커 다운로드가 정상 트리거된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const fakeBlob = new Blob(['sample-data'], { type: 'application/pdf' });
+      vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'spec097-guide.pdf', chunkIndex: 0, documentId: 'doc-097', score: 0.95 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('AC 1 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      // 1. window.open 미호출 검증 (사전 빈 탭 생성 방지)
+      expect(windowOpenMock).not.toHaveBeenCalled();
+      // 2. getDocumentFile 호출 검증
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-097');
+      // 3. 앵커 다운로드 속성 및 URL 해제 검증
+      expect(createObjectURLMock).toHaveBeenCalledWith(fakeBlob);
+      expect(capturedAnchor.download).toBe('spec097-guide.pdf');
+      expect(capturedAnchor.href).toBe('blob:mock-url');
+      expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:mock-url');
+    });
+
+    it('AC 2: Given 대화창에 2개 이상의 AI 답변 메시지가 렌더링되어 있고 각각 참고 문서가 표시된 상태에서 When 첫 번째 답변의 특정 출처 문서 원문 조회가 실패하면 Then 첫 번째 답변의 해당 출처 그룹 하단에만 에러가 노출되고 두 번째 답변 버블에는 에러 문구가 전혀 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-multi-answers', title: '다중 답변 세션', updatedAt: '2026-11-10T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-multi-answers',
+        title: '다중 답변 세션',
+        createdAt: '2026-11-10T00:00:00Z',
+        updatedAt: '2026-11-10T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문 1',
+            createdAt: '2026-11-10T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 1 내용',
+            createdAt: '2026-11-10T00:00:01Z',
+            sources: [
+              { fileName: 'doc-turn-1.pdf', chunkIndex: 0, documentId: 'd-1', score: 0.8 },
+            ],
+          },
+          {
+            role: 'user',
+            content: '질문 2',
+            createdAt: '2026-11-10T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 2 내용',
+            createdAt: '2026-11-10T00:00:03Z',
+            sources: [
+              { fileName: 'doc-turn-2.pdf', chunkIndex: 0, documentId: 'd-2', score: 0.9 },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Network failure'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('다중 답변 세션'));
+      });
+
+      const viewBtns = screen.getAllByRole('button', { name: '원문 보기' });
+      expect(viewBtns).toHaveLength(2);
+
+      // 첫 번째 답변의 [원문 보기] 클릭 -> 실패
+      await act(async () => {
+        fireEvent.click(viewBtns[0]);
+      });
+
+      // 에러 메시지는 전체 화면 중 단 1개만 나타나야 하며, 첫 번째 답변 영역에 국한되어야 함
+      const errorElements = screen.getAllByRole('alert');
+      expect(errorElements).toHaveLength(1);
+      expect(errorElements[0]).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
+
+      // 첫 번째 답변 버블 내부에는 에러가 존재하고, 두 번째 답변 버블 내부에는 에러가 없어야 함
+      const chatMessages = document.querySelectorAll('.chat-message.ai');
+      expect(chatMessages).toHaveLength(2);
+      expect(chatMessages[0].querySelector('.source-ref-file-error')).not.toBeNull();
+      expect(chatMessages[1].querySelector('.source-ref-file-error')).toBeNull();
+    });
+
+    it('AC 3: Given 특정 문서 원문 다운로드가 진행 중인 상황에서 When 출처 영역을 확인하면 Then 다운로드가 요청된 해당 버튼만 "불러오는 중…" 텍스트로 변경되고 비활성화되며 다른 문서 출처의 [원문 보기] 버튼은 비활성화되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-multi-docs', title: '복수 문서 세션', updatedAt: '2026-11-10T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-multi-docs',
+        title: '복수 문서 세션',
+        createdAt: '2026-11-10T00:00:00Z',
+        updatedAt: '2026-11-10T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '질문',
+            createdAt: '2026-11-10T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '답변 내용',
+            createdAt: '2026-11-10T00:00:01Z',
+            sources: [
+              { fileName: 'doc-a.pdf', chunkIndex: 0, documentId: 'doc-a', score: 0.9 },
+              { fileName: 'doc-b.pdf', chunkIndex: 0, documentId: 'doc-b', score: 0.8 },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      let resolveDocA: (val: Blob) => void;
+      const pendingDocAPromise = new Promise<Blob>((resolve) => {
+        resolveDocA = resolve;
+      });
+      vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(pendingDocAPromise);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복수 문서 세션'));
+      });
+
+      const viewBtns = screen.getAllByRole('button', { name: '원문 보기' });
+      expect(viewBtns).toHaveLength(2);
+
+      // doc-a 다운로드 시작
+      await act(async () => {
+        fireEvent.click(viewBtns[0]);
+      });
+
+      // doc-a 버튼은 "불러오는 중…"이며 disabled 상태여야 함
+      expect(screen.getByRole('button', { name: '불러오는 중…' })).toBeDisabled();
+
+      // doc-b 버튼은 여전히 "원문 보기"이고 disabled가 아니어야 함
+      const remainingBtn = screen.getByRole('button', { name: '원문 보기' });
+      expect(remainingBtn).not.toBeDisabled();
+
+      // doc-a 완료
+      await act(async () => {
+        resolveDocA!(new Blob(['doc-a-content']));
+      });
+
+      // 다운로드 완료 후 버튼 상태 복원
+      expect(screen.queryByRole('button', { name: '불러오는 중…' })).toBeNull();
+      expect(screen.getAllByRole('button', { name: '원문 보기' })).toHaveLength(2);
+    });
+
+    it('AC 4: Given 세션 복원으로 과거 대화 내역을 불러온 상황에서 When 특정 AI 메시지의 출처 문서에서 [원문 보기]를 클릭하면 Then 동일하게 빈 탭 잔류 없이 해당 문서 파일명으로 다운로드가 정상 실행된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-restore', title: '복원된 세션', updatedAt: '2026-11-10T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-restore',
+        title: '복원된 세션',
+        createdAt: '2026-11-10T00:00:00Z',
+        updatedAt: '2026-11-10T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '과거 질문',
+            createdAt: '2026-11-10T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '과거 답변',
+            createdAt: '2026-11-10T00:00:01Z',
+            sources: [
+              { fileName: 'restored-manual.pdf', chunkIndex: 0, documentId: 'doc-restored', score: 0.9 },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+      const fakeBlob = new Blob(['restored-content']);
+      vi.mocked(aiApi.getDocumentFile).mockResolvedValueOnce(fakeBlob);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복원된 세션'));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      expect(windowOpenMock).not.toHaveBeenCalled();
+      expect(aiApi.getDocumentFile).toHaveBeenCalledWith('doc-restored');
+      expect(capturedAnchor.download).toBe('restored-manual.pdf');
+      expect(capturedAnchor.href).toBe('blob:mock-url');
+    });
+
+    it('AC 5: Given 파일 다운로드가 실패하여 에러 메시지가 표시된 출처 그룹에서 When 사용자가 [원문 보기]를 다시 클릭하면 Then 이전에 표시되었던 에러 메시지가 즉시 초기화되고 새로운 다운로드 요청이 실행된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'retry-doc.pdf', chunkIndex: 0, documentId: 'doc-retry', score: 0.9 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('재시도 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      // 1차 실패, 2차 대기 프로미스
+      let resolveSecondTry: (val: Blob) => void;
+      const secondTryPromise = new Promise<Blob>((resolve) => {
+        resolveSecondTry = resolve;
+      });
+      vi.mocked(aiApi.getDocumentFile)
+        .mockRejectedValueOnce(new Error('First try failed'))
+        .mockReturnValueOnce(secondTryPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '재시도 테스트 질문' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+
+      // 1차 클릭: 에러 발생
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
+
+      // 2차 클릭: 에러 즉시 초기화 및 재요청 진행 중
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      // 에러 메시지가 초기화되어 사라졌는지 확인
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('button', { name: '불러오는 중…' })).toBeDisabled();
+
+      // 2차 성공 처리
+      await act(async () => {
+        resolveSecondTry!(new Blob(['retry-success']));
+      });
+
+      expect(capturedAnchor.download).toBe('retry-doc.pdf');
+    });
+
+    it('QA: Given 스트리밍 진행 중인 실시간 AI 답변의 출처 목록에서도 [원문 보기] 클릭 시 브라우저 표준 다운로드 및 로딩/에러 격리가 정상 동작한다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'stream-doc.pdf', chunkIndex: 0, documentId: 'doc-stream', score: 0.95 },
+      ];
+
+      // 스트리밍이 끝나지 않은 상태 유지
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, _onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('스트리밍 중인 내용...');
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Streaming file view failed'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '스트리밍 질문' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 스트리밍 버블 내 [원문 보기] 버튼
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      // 스트리밍 출처에 에러가 국소적으로 표시되는지 검증
+      expect(windowOpenMock).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
+
+      const streamingBubble = document.querySelector('.message-bubble.streaming');
+      expect(streamingBubble?.querySelector('.source-ref-file-error')).not.toBeNull();
+    });
+
+    it('QA 1: Given 서로 다른 AI 메시지 버블에 동일한 documentId를 가진 출처가 인용되었을 때 When 한쪽에서 원문 조회가 실패해도 다른 쪽 메시지 버블의 출처에는 영향을 주지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-same-doc-turns', title: '동일 문서 다중 턴 세션', updatedAt: '2026-11-10T00:00:00Z' },
+      ]);
+
+      const mockSessionDetail: aiApi.SessionDetailOut = {
+        sessionId: 'sess-same-doc-turns',
+        title: '동일 문서 다중 턴 세션',
+        createdAt: '2026-11-10T00:00:00Z',
+        updatedAt: '2026-11-10T00:00:00Z',
+        turns: [
+          {
+            role: 'user',
+            content: '첫 번째 질문',
+            createdAt: '2026-11-10T00:00:00Z',
+          },
+          {
+            role: 'assistant',
+            content: '첫 번째 답변',
+            createdAt: '2026-11-10T00:00:01Z',
+            sources: [
+              { fileName: 'shared-doc.pdf', chunkIndex: 0, documentId: 'doc-shared-id', score: 0.9 },
+            ],
+          },
+          {
+            role: 'user',
+            content: '두 번째 질문',
+            createdAt: '2026-11-10T00:00:02Z',
+          },
+          {
+            role: 'assistant',
+            content: '두 번째 답변',
+            createdAt: '2026-11-10T00:00:03Z',
+            sources: [
+              { fileName: 'shared-doc.pdf', chunkIndex: 1, documentId: 'doc-shared-id', score: 0.85 },
+            ],
+          },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+      // 첫 번째 호출은 실패, 두 번째 호출은 성공
+      vi.mocked(aiApi.getDocumentFile)
+        .mockRejectedValueOnce(new Error('First turn failed'))
+        .mockResolvedValueOnce(new Blob(['shared-success-content']));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('동일 문서 다중 턴 세션'));
+      });
+
+      const viewBtns = screen.getAllByRole('button', { name: '원문 보기' });
+      expect(viewBtns).toHaveLength(2);
+
+      // 첫 번째 버블의 [원문 보기] 클릭 -> 실패
+      await act(async () => {
+        fireEvent.click(viewBtns[0]);
+      });
+
+      // 첫 번째 버블에만 에러 노출되고 두 번째 버블에는 에러가 없어야 함
+      const chatMessages = document.querySelectorAll('.chat-message.ai');
+      expect(chatMessages).toHaveLength(2);
+      expect(chatMessages[0].querySelector('.source-ref-file-error')).not.toBeNull();
+      expect(chatMessages[1].querySelector('.source-ref-file-error')).toBeNull();
+
+      // 두 번째 버블의 동일 문서 [원문 보기] 버튼은 비활성화되지 않고 정상 유지됨
+      expect(viewBtns[1]).not.toBeDisabled();
+
+      // 두 번째 버블의 [원문 보기] 클릭 -> 성공 다운로드
+      await act(async () => {
+        fireEvent.click(viewBtns[1]);
+      });
+
+      expect(capturedAnchor.download).toBe('shared-doc.pdf');
+      expect(capturedAnchor.href).toBe('blob:mock-url');
+    });
+
+    it('QA 2: Given 원문 파일 다운로드가 진행 중일 때 When 사용자가 해당 버튼을 연속으로 여러 번 클릭해도 getDocumentFile API는 중복 호출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'single-click.pdf', chunkIndex: 0, documentId: 'doc-single', score: 0.9 },
+      ];
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('단일 클릭 답변');
+            onDone();
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      let resolveCall: (val: Blob) => void;
+      const pendingPromise = new Promise<Blob>((resolve) => {
+        resolveCall = resolve;
+      });
+      vi.mocked(aiApi.getDocumentFile).mockReturnValueOnce(pendingPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      const viewBtn = screen.getByRole('button', { name: '원문 보기' });
+
+      // 첫 번째 클릭
+      await act(async () => {
+        fireEvent.click(viewBtn);
+      });
+
+      // 진행 중 상태에서 버튼을 2회 더 클릭
+      await act(async () => {
+        fireEvent.click(viewBtn);
+        fireEvent.click(viewBtn);
+      });
+
+      // API는 단 1회만 호출되어야 함
+      expect(aiApi.getDocumentFile).toHaveBeenCalledTimes(1);
+
+      // 다운로드 완료
+      await act(async () => {
+        resolveCall!(new Blob(['single-content']));
+      });
+
+      expect(capturedAnchor.download).toBe('single-click.pdf');
+    });
+
+    it('QA 3: Given 첫 번째 스트리밍 중 출처의 원문 조회가 실패했을 때 When 새 질문을 스트리밍하고 동일 문서가 다시 인용되면 Then 새 스트리밍 버블에 이전 에러가 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      const mockSources: aiApi.SourceRef[] = [
+        { fileName: 'reused-doc.pdf', chunkIndex: 0, documentId: 'doc-reused', score: 0.9 },
+      ];
+
+      let stream1Done: () => void;
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('첫 번째 스트리밍 답변');
+          }, 10);
+          stream1Done = onDone;
+          return Promise.resolve();
+        },
+      );
+
+      vi.mocked(aiApi.getDocumentFile).mockRejectedValueOnce(new Error('Stream 1 file error'));
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문 1' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 스트리밍 버블의 [원문 보기] 클릭 -> 실패
+      const streamViewBtn = screen.getByRole('button', { name: '원문 보기' });
+      await act(async () => {
+        fireEvent.click(streamViewBtn);
+      });
+
+      // 스트리밍 버블에 에러 노출 확인
+      expect(screen.getByRole('alert')).toHaveTextContent('원본 파일을 불러오는 데 실패했습니다.');
+
+      // 스트림 1 완료 -> chatLog로 이전됨
+      await act(async () => {
+        stream1Done!();
+      });
+
+      // 두 번째 질문 스트리밍 설정 (동일 문서 출처 인용)
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(
+        (_question, onMessage, _onDone, _onError, _userId, _chatLog, onSources) => {
+          setTimeout(() => {
+            onSources?.(mockSources);
+            onMessage('두 번째 스트리밍 진행 중...');
+          }, 10);
+          return Promise.resolve();
+        },
+      );
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '질문 2' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 새 스트리밍 버블 확인
+      const streamingBubble = document.querySelector('.message-bubble.streaming');
+      expect(streamingBubble).not.toBeNull();
+      // 새 스트리밍 버블 내 출처에 이전 에러가 노출되지 않아야 함
+      expect(streamingBubble?.querySelector('.source-ref-file-error')).toBeNull();
+      // [원문 보기] 버튼도 disabled 상태가 아니어야 함
+      const newStreamViewBtn = streamingBubble?.querySelector('.source-ref-view-btn');
+      expect(newStreamViewBtn).not.toBeDisabled();
+      expect(newStreamViewBtn).toHaveTextContent('원문 보기');
     });
   });
 });
