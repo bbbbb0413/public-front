@@ -9,9 +9,11 @@ export const ChatRoom = () => {
   const [roomId, setRoomId] = useState('lobby');
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
 
   const token = auth?.token ?? null;
-  const { messages, connected, error, sendMessage } = useChatSocket({ roomId, token });
+  const { messages, connected, error, sendMessage, hasMore, loadingMore, loadMoreMessages } =
+    useChatSocket({ roomId, token });
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,9 +28,14 @@ export const ChatRoom = () => {
     setRoomId(roomIdInput);
   };
 
-  // 메시지가 유입되면 스크롤을 최하단으로 부드럽게 조정
+  // 새 메시지가 유입되거나 방 입장 시 스크롤을 최하단으로 부드럽게 조정 (이전 대화 로드 시 강제 스크롤 방지)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length === 0) return;
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage && latestMessage.id !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = latestMessage.id;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   return (
@@ -70,6 +77,16 @@ export const ChatRoom = () => {
         {error && <div className="chat-error-bar">{error}</div>}
 
         <div className="chat-messages-container">
+          {hasMore && messages.length > 0 && (
+            <button
+              type="button"
+              className="btn-load-more"
+              onClick={loadMoreMessages}
+              disabled={loadingMore}
+            >
+              {loadingMore ? '불러오는 중...' : '이전 대화 더보기'}
+            </button>
+          )}
           {messages.length === 0 ? (
             <div className="empty-chat-message">채팅방에 메시지가 없습니다. 첫 메시지를 보내보세요.</div>
           ) : (

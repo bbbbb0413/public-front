@@ -15,7 +15,17 @@ interface SocketAck {
   success: boolean;
   error?: string;
   messages?: HistoryMessage[];
+  hasMore?: boolean;
 }
+
+export interface FetchHistoryAck {
+  success: boolean;
+  error?: string;
+  messages?: HistoryMessage[];
+  hasMore?: boolean;
+}
+
+const DEFAULT_HISTORY_LIMIT = 20;
 
 interface UseChatSocketProps {
   roomId: string;
@@ -26,6 +36,8 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
   const [messages, setMessages] = useState<DecodedMessage[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -60,6 +72,11 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
             eventTimestamp: m.createdAt * 1000,
           }));
           setMessages(history);
+          const more =
+            response.hasMore !== undefined
+              ? response.hasMore
+              : history.length >= DEFAULT_HISTORY_LIMIT;
+          setHasMore(more);
         }
       });
     });
@@ -97,8 +114,61 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
       socketRef.current = null;
       setConnected(false);
       setMessages([]);
+      setHasMore(false);
+      setLoadingMore(false);
     };
   }, [roomId, token]);
+
+  // 이전 대화 페이징 조회 유틸
+  const loadMoreMessages = useCallback(async (): Promise<void> => {
+    const socket = socketRef.current;
+    if (!socket || loadingMore || !hasMore || messages.length === 0) {
+      return;
+    }
+
+    const oldestTimestamp = messages[0].timestamp;
+    setLoadingMore(true);
+
+    return new Promise<void>((resolve) => {
+      socket.emit(
+        'fetch_history',
+        { roomId, before: oldestTimestamp },
+        (response: FetchHistoryAck) => {
+          try {
+            if (response && !response.success) {
+              setError(response.error || '이전 대화를 불러오지 못했습니다.');
+              return;
+            }
+
+            if (response?.messages) {
+              const history: DecodedMessage[] = response.messages.map((m) => ({
+                id: m.messageId,
+                status: 0,
+                senderId: m.senderUuid,
+                content: m.content,
+                metadata: m.senderNickname || '',
+                timestamp: m.createdAt,
+                eventTimestamp: m.createdAt * 1000,
+              }));
+
+              setMessages((prev) => {
+                const existingIds = new Set(prev.map((m) => m.id));
+                const filteredHistory = history.filter((m) => !existingIds.has(m.id));
+                return [...filteredHistory, ...prev];
+              });
+
+              setHasMore(response.hasMore ?? false);
+            } else {
+              setHasMore(false);
+            }
+          } finally {
+            setLoadingMore(false);
+            resolve();
+          }
+        }
+      );
+    });
+  }, [roomId, loadingMore, hasMore, messages]);
 
   // 메시지 송신 유틸
   const sendMessage = useCallback((content: string) => {
@@ -120,5 +190,5 @@ export const useChatSocket = ({ roomId, token }: UseChatSocketProps) => {
     }
   }, [roomId, connected]);
 
-  return { messages, connected, error, sendMessage };
+  return { messages, connected, error, sendMessage, hasMore, loadingMore, loadMoreMessages };
 };
