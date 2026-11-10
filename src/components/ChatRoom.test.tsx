@@ -346,5 +346,154 @@ describe('ChatRoom Component', () => {
       const loadMoreBtn = screen.getByRole('button', { name: '이전 대화 더보기' });
       expect(loadMoreBtn).toHaveAttribute('type', 'button');
     });
+
+    it('QA AC 1: renders [이전 대화 더보기] button at top of message container when 20 initial messages and hasMore is true', () => {
+      const mock20Messages = Array.from({ length: 20 }, (_, i) => ({
+        id: `msg-${i}`,
+        status: 0,
+        senderId: `user-${i}`,
+        content: `메시지 본문 ${i}`,
+        metadata: `작성자${i}`,
+        timestamp: 1710000000000 + i * 1000,
+        eventTimestamp: (1710000000000 + i * 1000) * 1000,
+      }));
+
+      mockChatSocket({
+        messages: mock20Messages,
+        hasMore: true,
+        loadingMore: false,
+      });
+
+      const { container } = renderChatRoom();
+
+      const loadMoreBtn = screen.getByRole('button', { name: '이전 대화 더보기' });
+      expect(loadMoreBtn).toBeInTheDocument();
+      expect(loadMoreBtn).not.toBeDisabled();
+
+      // 메시지 컨테이너 내부의 첫 번째 요소가 더보기 버튼인지 확인
+      const messagesContainer = container.querySelector('.chat-messages-container');
+      expect(messagesContainer).toBeInTheDocument();
+      expect(messagesContainer?.firstElementChild).toBe(loadMoreBtn);
+    });
+
+    it('QA AC 2: changes text to "불러오는 중..." and becomes disabled during loading state', () => {
+      const loadMoreMessagesMock = vi.fn();
+      const { rerender } = render(
+        <AuthContext.Provider value={mockAuthValue}>
+          <ChatRoom />
+        </AuthContext.Provider>
+      );
+
+      // 처음에는 hasMore: true, loadingMore: false
+      mockChatSocket({
+        messages: [
+          {
+            id: 'msg-1',
+            status: 0,
+            senderId: 'user-1',
+            content: '대화 1',
+            metadata: '유저1',
+            timestamp: 1710000000000,
+            eventTimestamp: 1710000000000000,
+          },
+        ],
+        hasMore: true,
+        loadingMore: false,
+        loadMoreMessages: loadMoreMessagesMock,
+      });
+
+      rerender(
+        <AuthContext.Provider value={mockAuthValue}>
+          <ChatRoom />
+        </AuthContext.Provider>
+      );
+
+      const loadMoreBtn = screen.getByRole('button', { name: '이전 대화 더보기' });
+      expect(loadMoreBtn).not.toBeDisabled();
+      loadMoreBtn.click();
+      expect(loadMoreMessagesMock).toHaveBeenCalledTimes(1);
+
+      // 로딩 상태(loadingMore: true)로 전환 시
+      mockChatSocket({
+        messages: [
+          {
+            id: 'msg-1',
+            status: 0,
+            senderId: 'user-1',
+            content: '대화 1',
+            metadata: '유저1',
+            timestamp: 1710000000000,
+            eventTimestamp: 1710000000000000,
+          },
+        ],
+        hasMore: true,
+        loadingMore: true,
+        loadMoreMessages: loadMoreMessagesMock,
+      });
+
+      rerender(
+        <AuthContext.Provider value={mockAuthValue}>
+          <ChatRoom />
+        </AuthContext.Provider>
+      );
+
+      const loadingBtn = screen.getByRole('button', { name: '불러오는 중...' });
+      expect(loadingBtn).toBeInTheDocument();
+      expect(loadingBtn).toBeDisabled();
+    });
+
+    it('QA AC 3: removes [이전 대화 더보기] button when hasMore transitions to false after loading past messages', () => {
+      const { rerender } = render(
+        <AuthContext.Provider value={mockAuthValue}>
+          <ChatRoom />
+        </AuthContext.Provider>
+      );
+
+      // 과거 메시지 10건 추가 후 hasMore가 false로 갱신된 상태
+      mockChatSocket({
+        messages: Array.from({ length: 30 }, (_, i) => ({
+          id: `msg-${i}`,
+          status: 0,
+          senderId: `user-${i}`,
+          content: `메시지 ${i}`,
+          metadata: `작성자${i}`,
+          timestamp: 1710000000000 + i * 1000,
+          eventTimestamp: (1710000000000 + i * 1000) * 1000,
+        })),
+        hasMore: false,
+        loadingMore: false,
+      });
+
+      rerender(
+        <AuthContext.Provider value={mockAuthValue}>
+          <ChatRoom />
+        </AuthContext.Provider>
+      );
+
+      expect(screen.queryByRole('button', { name: '이전 대화 더보기' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '불러오는 중...' })).not.toBeInTheDocument();
+      expect(screen.getAllByText(/메시지 \d+/)).toHaveLength(30);
+    });
+
+    it('QA AC 4: does not render [이전 대화 더보기] button when total messages is 5 and hasMore is false', () => {
+      mockChatSocket({
+        messages: Array.from({ length: 5 }, (_, i) => ({
+          id: `msg-${i}`,
+          status: 0,
+          senderId: `user-${i}`,
+          content: `대화 ${i}`,
+          metadata: `작성자${i}`,
+          timestamp: 1710000000000 + i * 1000,
+          eventTimestamp: (1710000000000 + i * 1000) * 1000,
+        })),
+        hasMore: false,
+        loadingMore: false,
+      });
+
+      renderChatRoom();
+
+      expect(screen.queryByRole('button', { name: /이전 대화 더보기|불러오는 중.../ })).not.toBeInTheDocument();
+      expect(screen.getAllByText(/대화 \d+/)).toHaveLength(5);
+    });
   });
 });

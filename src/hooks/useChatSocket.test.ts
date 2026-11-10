@@ -475,5 +475,193 @@ describe('useChatSocket Hook', () => {
       expect(result.current.loadingMore).toBe(false);
       expect(result.current.error).toBe('join_room required');
     });
+
+    it('QA AC 3: prepends 10 past messages in chronological order and sets hasMore to false when gateway responds with 10 messages and hasMore: false', async () => {
+      const { result } = renderHook(() =>
+        useChatSocket({ roomId: 'lobby', token: 'valid-token' })
+      );
+
+      act(() => {
+        eventHandlers['connect']?.();
+      });
+
+      const joinRoomCall = mockSocket.emit.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'join_room'
+      );
+      const joinRoomCallback = joinRoomCall?.[2] as (response: unknown) => void;
+
+      // 초기 20건의 메시지 수신 (id: initial-0 ~ initial-19, timestamp: 2000 ~ 2019)
+      const initialMessages = Array.from({ length: 20 }, (_, i) => ({
+        messageId: `initial-${i}`,
+        senderUuid: `sender-${i}`,
+        senderNickname: `닉네임${i}`,
+        content: `초기 메시지 ${i}`,
+        createdAt: 2000 + i,
+      }));
+
+      act(() => {
+        joinRoomCallback({
+          success: true,
+          hasMore: true,
+          messages: initialMessages,
+        });
+      });
+
+      expect(result.current.messages).toHaveLength(20);
+      expect(result.current.hasMore).toBe(true);
+
+      // loadMoreMessages 실행
+      let loadMorePromise: Promise<void>;
+      act(() => {
+        loadMorePromise = result.current.loadMoreMessages();
+      });
+
+      // 가장 오래된 메시지 타임스탬프(2000)를 before 커서로 전송 확인
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'fetch_history',
+        { roomId: 'lobby', before: 2000 },
+        expect.any(Function)
+      );
+
+      const fetchHistoryCall = mockSocket.emit.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'fetch_history'
+      );
+      const fetchHistoryCallback = fetchHistoryCall?.[2] as (response: unknown) => void;
+
+      // 과거 메시지 10건 (id: past-0 ~ past-9, timestamp: 1000 ~ 1009, hasMore: false)
+      const pastMessages = Array.from({ length: 10 }, (_, i) => ({
+        messageId: `past-${i}`,
+        senderUuid: `past-sender-${i}`,
+        senderNickname: `과거작성자${i}`,
+        content: `과거 메시지 ${i}`,
+        createdAt: 1000 + i,
+      }));
+
+      await act(async () => {
+        fetchHistoryCallback({
+          success: true,
+          messages: pastMessages,
+          hasMore: false,
+        });
+        await loadMorePromise;
+      });
+
+      // 총 30건이 되어야 함
+      expect(result.current.messages).toHaveLength(30);
+      // 상위 10건은 과거 메시지 시간순 (1000 ~ 1009)
+      for (let i = 0; i < 10; i++) {
+        expect(result.current.messages[i].id).toBe(`past-${i}`);
+        expect(result.current.messages[i].timestamp).toBe(1000 + i);
+        expect(result.current.messages[i].content).toBe(`과거 메시지 ${i}`);
+      }
+      // 하위 20건은 기존 초기 메시지 시간순 (2000 ~ 2019)
+      for (let i = 0; i < 20; i++) {
+        expect(result.current.messages[10 + i].id).toBe(`initial-${i}`);
+        expect(result.current.messages[10 + i].timestamp).toBe(2000 + i);
+      }
+      // hasMore는 false로 갱신
+      expect(result.current.hasMore).toBe(false);
+      expect(result.current.loadingMore).toBe(false);
+    });
+
+    it('QA AC 4: sets hasMore to false when initial join_room returns only 5 messages (edge case)', () => {
+      const { result } = renderHook(() =>
+        useChatSocket({ roomId: 'lobby', token: 'valid-token' })
+      );
+
+      act(() => {
+        eventHandlers['connect']?.();
+      });
+
+      const joinRoomCall = mockSocket.emit.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'join_room'
+      );
+      const joinRoomCallback = joinRoomCall?.[2] as (response: unknown) => void;
+
+      // 5건만 존재하는 방
+      const fiveMessages = Array.from({ length: 5 }, (_, i) => ({
+        messageId: `msg-${i}`,
+        senderUuid: `sender-${i}`,
+        content: `대화 ${i}`,
+        createdAt: 1710000000 + i,
+      }));
+
+      act(() => {
+        joinRoomCallback({
+          success: true,
+          messages: fiveMessages,
+          // hasMore 필드가 없거나 false인 경우 모두 대응
+        });
+      });
+
+      expect(result.current.messages).toHaveLength(5);
+      expect(result.current.hasMore).toBe(false);
+    });
+
+    it('QA Edge: ignores consecutive loadMoreMessages calls while loadingMore is in flight', async () => {
+      const { result } = renderHook(() =>
+        useChatSocket({ roomId: 'lobby', token: 'valid-token' })
+      );
+
+      act(() => {
+        eventHandlers['connect']?.();
+      });
+
+      const joinRoomCall = mockSocket.emit.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'join_room'
+      );
+      const joinRoomCallback = joinRoomCall?.[2] as (response: unknown) => void;
+
+      act(() => {
+        joinRoomCallback({
+          success: true,
+          hasMore: true,
+          messages: [
+            {
+              messageId: 'msg-1',
+              senderUuid: 'u-1',
+              content: '첫 메시지',
+              createdAt: 1710000000,
+            },
+          ],
+        });
+      });
+
+      // 1차 호출
+      let firstPromise: Promise<void>;
+      act(() => {
+        firstPromise = result.current.loadMoreMessages();
+      });
+      expect(result.current.loadingMore).toBe(true);
+
+      const emitCountAfterFirst = mockSocket.emit.mock.calls.filter(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'fetch_history'
+      ).length;
+      expect(emitCountAfterFirst).toBe(1);
+
+      // 로딩 중 2차 호출 (무시되어야 함)
+      let secondPromise: Promise<void>;
+      act(() => {
+        secondPromise = result.current.loadMoreMessages();
+      });
+
+      const emitCountAfterSecond = mockSocket.emit.mock.calls.filter(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'fetch_history'
+      ).length;
+      expect(emitCountAfterSecond).toBe(1);
+
+      const fetchHistoryCall = mockSocket.emit.mock.calls.find(
+        (call: unknown[]) => Array.isArray(call) && call[0] === 'fetch_history'
+      );
+      const fetchHistoryCallback = fetchHistoryCall?.[2] as (response: unknown) => void;
+
+      await act(async () => {
+        fetchHistoryCallback({ success: true, messages: [], hasMore: false });
+        await firstPromise;
+        await secondPromise;
+      });
+
+      expect(result.current.loadingMore).toBe(false);
+    });
   });
 });
