@@ -66,8 +66,13 @@ export const UserManagement = () => {
     try {
       const updated = await updateUserRole(user.id, role);
       setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
-    } catch {
-      setError('권한 변경에 실패했습니다.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: unknown } } };
+      const serverMessage = err?.response?.data?.message;
+      const message = typeof serverMessage === 'string'
+        ? serverMessage
+        : (Array.isArray(serverMessage) ? serverMessage.join(', ') : '권한 변경에 실패했습니다.');
+      setError(message || '권한 변경에 실패했습니다.');
     }
   };
 
@@ -102,8 +107,13 @@ export const UserManagement = () => {
       await changePassword(pwModal.email, newPw);
       setPwModal(null);
       setNewPw('');
-    } catch {
-      setPwError('비밀번호 변경에 실패했습니다.');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: unknown } } };
+      const serverMessage = err?.response?.data?.message;
+      const message = typeof serverMessage === 'string'
+        ? serverMessage
+        : (Array.isArray(serverMessage) ? serverMessage.join(', ') : '비밀번호 변경에 실패했습니다.');
+      setPwError(message || '비밀번호 변경에 실패했습니다.');
     } finally {
       setPwLoading(false);
     }

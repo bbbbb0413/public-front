@@ -19,8 +19,10 @@ import {
   adminLogin,
   adminSignup,
   getUsers,
+  getUserById,
   activateUser,
   updateUserRole,
+  changePassword,
   deleteUser,
 } from './admin';
 
@@ -94,5 +96,24 @@ describe('admin API', () => {
     mockAxios.delete.mockResolvedValueOnce({ data: {} });
     await deleteUser(5);
     expect(mockAxios.delete).toHaveBeenCalledWith('/admin/user/5');
+  });
+
+  it('changePassword sends email and password to correct endpoint', async () => {
+    mockAxios.post.mockResolvedValueOnce({ data: {} });
+    await changePassword('user@example.com', 'NewPass123!');
+    expect(mockAxios.post).toHaveBeenCalledWith('/admin/user/change/password', {
+      email: 'user@example.com',
+      password: 'NewPass123!',
+    });
+  });
+
+  it('getUserById calls GET endpoint and returns user data', async () => {
+    mockAxios.get.mockResolvedValueOnce({
+      data: { data: { id: 3, email: 'detail@b.com', name: 'Detail', role: 'user', activatedAt: null } },
+    });
+    const result = await getUserById(3);
+    expect(mockAxios.get).toHaveBeenCalledWith('/admin/user/3');
+    expect(result.id).toBe(3);
+    expect(result.email).toBe('detail@b.com');
   });
 });
