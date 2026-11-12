@@ -11328,5 +11328,159 @@ describe('AiService Component', () => {
       const feedbackRefineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
       expect(feedbackRefineBtn).toBeDisabled();
     });
+
+    it('수용 기준 4: 사용자가 불만족 사유 [근거 문서와 다름]을 선택한 상태에서 [질문 보완하여 다시 질문] 클릭 시 보완 요청 사유가 포함되어 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-single-tag', title: '단일 사유 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-single-tag',
+        title: '단일 사유 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '공공데이터 포털 API 연동 방법', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '연동 가이드 답변', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-single-tag',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[근거 문서와 다름]',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('단일 사유 세션'));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('공공데이터 포털 API 연동 방법 (보완 요청: [근거 문서와 다름])');
+      expect(input).toHaveFocus();
+    });
+
+    it('수용 기준 6: 피드백에 코멘트가 전혀 없거나 공백만 저장된 상태에서 [질문 보완하여 다시 질문] 클릭 시 괄호 없이 직전 질문 원문만 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-empty-comment', title: '빈 코멘트 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-empty-comment',
+        title: '빈 코멘트 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '코멘트 없는 직전 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변 내용', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-empty-comment',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '   ',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('빈 코멘트 세션'));
+      });
+
+      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('코멘트 없는 직전 질문');
+      expect(input).toHaveFocus();
+    });
+
+    it('세션 복원 대화에서 근거 미발견(ungrounded) 답변의 [질문 구체화] 클릭 시 직전 질문이 정상 복원된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-restored-ungrounded', title: '복원된 근거미발견 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-restored-ungrounded',
+        title: '복원된 근거미발견 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '복원 세션 질문 원문', createdAt: '2026-08-28T01:00:00Z' },
+          {
+            role: 'assistant',
+            content: '출처 없는 복원 답변',
+            confidence: 0,
+            missing: [],
+            sources: [],
+            createdAt: '2026-08-28T01:00:01Z',
+          },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복원된 근거미발견 세션'));
+      });
+
+      const ungroundedWarning = screen.getByTestId('ungrounded-warning');
+      const refineBtn = within(ungroundedWarning).getByRole('button', { name: '질문 구체화' });
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('복원 세션 질문 원문');
+      expect(input).toHaveFocus();
+    });
   });
 });
