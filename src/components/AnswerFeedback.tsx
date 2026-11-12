@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { AnswerFeedbackOut } from '../api/ai';
 
 const RATINGS = [1, 2, 3, 4, 5] as const;
@@ -62,6 +62,8 @@ interface Props {
   }) => Promise<void>;
   onDelete?: () => Promise<void>;
   onSuccess?: (isUpdate: boolean) => void;
+  onClose?: () => void;
+  forceOpen?: boolean;
 }
 
 const getAccuracyClass = (accuracy: number): string => {
@@ -109,8 +111,16 @@ const RatingScale = ({ legend, name, labels, value, onChange }: ScaleProps) => (
  * 이미 평가한 답변이면 접힌 상태로 결과만 보여주고, 눌러서 다시 고칠 수 있다.
  * 다시 제출하면 서버가 기존 평가를 갱신한다.
  */
-export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Props) => {
-  const [isOpen, setIsOpen] = useState(false);
+export const AnswerFeedback = ({
+  existing,
+  onSubmit,
+  onDelete,
+  onSuccess,
+  onClose,
+  forceOpen,
+}: Props) => {
+  const [isOpen, setIsOpen] = useState(Boolean(forceOpen));
+  const containerRef = useRef<HTMLDivElement>(null);
   const [deleted, setDeleted] = useState(false);
   const [prevExisting, setPrevExisting] = useState(existing);
 
@@ -147,6 +157,25 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
     setError(null);
   };
 
+  const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
+  if (forceOpen !== prevForceOpen) {
+    setPrevForceOpen(forceOpen);
+    if (forceOpen) {
+      setIsOpen(true);
+      setAccuracy(effectiveExisting?.accuracy ?? null);
+      setHelpfulness(effectiveExisting?.helpfulness ?? null);
+      setComment(effectiveExisting?.comment ?? '');
+      setSelectedReasons(parseReasonsFromComment(effectiveExisting?.comment ?? ''));
+      setError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (forceOpen && isOpen) {
+      containerRef.current?.focus();
+    }
+  }, [forceOpen, isOpen]);
+
   const handleOpen = () => {
     resetForm();
     setIsOpen(true);
@@ -155,6 +184,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
   const handleCancel = () => {
     resetForm();
     setIsOpen(false);
+    onClose?.();
   };
 
   const handleAccuracyChange = (val: number) => {
@@ -195,6 +225,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
       setDeleted(false);
       setIsOpen(false);
       onSuccess?.(isUpdate);
+      onClose?.();
     } catch {
       // 네트워크 오류로 평가가 날아가면 사용자는 다시 쓸 마음을 잃는다.
       // 입력값은 그대로 두고 재시도만 안내한다.
@@ -216,6 +247,7 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
       setComment('');
       setSelectedReasons([]);
       setIsOpen(false);
+      onClose?.();
     } catch {
       setError('평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
@@ -254,7 +286,12 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
   }
 
   return (
-    <div className="answer-feedback" data-testid="answer-feedback">
+    <div
+      className="answer-feedback"
+      data-testid="answer-feedback"
+      ref={containerRef}
+      tabIndex={-1}
+    >
       <RatingScale
         legend="정확도"
         name="accuracy"
