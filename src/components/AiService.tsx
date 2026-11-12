@@ -186,6 +186,7 @@ export const AiService = () => {
   const [fileViewErrors, setFileViewErrors] = useState<Record<string, string>>({});
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [feedbackByTurn, setFeedbackByTurn] = useState<Record<number, AnswerFeedbackOut>>({});
+  const [activeFeedbackTurns, setActiveFeedbackTurns] = useState<Record<number, boolean>>({});
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isPromptSettingsOpen, setIsPromptSettingsOpen] = useState(false);
@@ -421,6 +422,7 @@ export const AiService = () => {
     setCurrentProgress(null);
     setCopiedIndex(null);
     setFeedbackByTurn({});
+    setActiveFeedbackTurns({});
   };
 
   const loadFeedback = async (sid: string) => {
@@ -454,10 +456,18 @@ export const AiService = () => {
     showBookmarkToast('답변 평가가 삭제되었습니다.');
   };
 
+  const handleOpenFeedbackFromWarning = (turnIndex: number) => {
+    setActiveFeedbackTurns((prev) => ({
+      ...prev,
+      [turnIndex]: true,
+    }));
+  };
+
   const handleLoadSession = async (sid: string) => {
     try {
       const detail = await getSessionDetail(sid);
       if (!detail) return;
+      setActiveFeedbackTurns({});
       setSessionId(detail.sessionId);
       const loaded: ChatMessage[] = detail.turns.map((t) => ({
         sender: t.role === 'user' ? 'user' : 'ai',
@@ -944,16 +954,35 @@ export const AiService = () => {
     chatInputRef.current?.focus();
   };
 
-  const handleRefineFeedbackQuestion = (msgIndex: number) => {
+  const handleRefineFeedbackQuestion = (msgIndex: number, turnIndex?: number) => {
     const previousUserMsg = chatLog
       .slice(0, msgIndex)
       .reverse()
       .find((m) => m.sender === 'user');
     const questionText = previousUserMsg?.text || '';
-    if (questionText) {
-      setQuestion(questionText);
-      chatInputRef.current?.focus();
+    if (!questionText) return;
+
+    const actualTurnIndex =
+      turnIndex !== undefined ? turnIndex : getSessionTurnIndex(chatLog, msgIndex);
+    const feedback = feedbackByTurn[actualTurnIndex];
+    const rawComment = (feedback?.comment || '').trim();
+
+    let extractedReason = '';
+    if (rawComment) {
+      const tagMatches = rawComment.match(/\[([^\]]+)\]/g);
+      if (tagMatches && tagMatches.length > 0) {
+        extractedReason = tagMatches.join(' ');
+      } else {
+        extractedReason = rawComment;
+      }
     }
+
+    if (extractedReason) {
+      setQuestion(`${questionText} (보완 요청: ${extractedReason})`);
+    } else {
+      setQuestion(questionText);
+    }
+    chatInputRef.current?.focus();
   };
 
   const handleAskMissingItem = (itemText: string) => {
@@ -1580,12 +1609,41 @@ export const AiService = () => {
                           <>
                           {isUngrounded ? (
                             <div className="ungrounded-warning" data-testid="ungrounded-warning">
-                              <span className="ungrounded-warning-icon" aria-hidden="true">
-                                ⚠
-                              </span>
-                              <span className="ungrounded-warning-text">
-                                근거 문서 미발견 (모델 일반 지식 기반 답변)
-                              </span>
+                              <div className="ungrounded-warning-content">
+                                <span className="ungrounded-warning-icon" aria-hidden="true">
+                                  ⚠
+                                </span>
+                                <span className="ungrounded-warning-text">
+                                  근거 문서 미발견 (모델 일반 지식 기반 답변)
+                                </span>
+                              </div>
+                              <div className="ungrounded-warning-actions">
+                                <button
+                                  type="button"
+                                  className="btn-refine-question"
+                                  data-testid="btn-refine-question"
+                                  onClick={() => {
+                                    const relatedQuestion =
+                                      chatLog
+                                        .slice(0, idx)
+                                        .reverse()
+                                        .find((m) => m.sender === 'user')?.text || '';
+                                    handleRefineQuestion(relatedQuestion);
+                                  }}
+                                  disabled={isStreaming}
+                                >
+                                  질문 구체화
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-warning-feedback"
+                                  data-testid="btn-warning-feedback"
+                                  onClick={() => handleOpenFeedbackFromWarning(turnIndex)}
+                                  disabled={isStreaming}
+                                >
+                                  답변 평가
+                                </button>
+                              </div>
                             </div>
                           ) : isLowConfidence ? (
                             <div className="low-confidence-warning" data-testid="low-confidence-warning">
@@ -1597,22 +1655,33 @@ export const AiService = () => {
                                   지식베이스와의 관련도가 낮아 답변이 부정확할 수 있습니다. 질문을 더 구체적으로 작성해 보세요.
                                 </span>
                               </div>
-                              <button
-                                type="button"
-                                className="btn-refine-question"
-                                data-testid="btn-refine-question"
-                                onClick={() => {
-                                  const relatedQuestion =
-                                    chatLog
-                                      .slice(0, idx)
-                                      .reverse()
-                                      .find((m) => m.sender === 'user')?.text || '';
-                                  handleRefineQuestion(relatedQuestion);
-                                }}
-                                disabled={isStreaming}
-                              >
-                                질문 구체화
-                              </button>
+                              <div className="low-confidence-warning-actions">
+                                <button
+                                  type="button"
+                                  className="btn-refine-question"
+                                  data-testid="btn-refine-question"
+                                  onClick={() => {
+                                    const relatedQuestion =
+                                      chatLog
+                                        .slice(0, idx)
+                                        .reverse()
+                                        .find((m) => m.sender === 'user')?.text || '';
+                                    handleRefineQuestion(relatedQuestion);
+                                  }}
+                                  disabled={isStreaming}
+                                >
+                                  질문 구체화
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-warning-feedback"
+                                  data-testid="btn-warning-feedback"
+                                  onClick={() => handleOpenFeedbackFromWarning(turnIndex)}
+                                  disabled={isStreaming}
+                                >
+                                  답변 평가
+                                </button>
+                              </div>
                             </div>
                           ) : null}
                           <ReactMarkdown
@@ -1799,6 +1868,7 @@ export const AiService = () => {
                               existing={feedbackByTurn[turnIndex]}
                               onSubmit={(input) => handleSubmitFeedback(turnIndex, input)}
                               onDelete={() => handleDeleteFeedback(turnIndex)}
+                              forceOpen={Boolean(activeFeedbackTurns[turnIndex])}
                             />
                           )}
                           {sessionId &&
@@ -1807,7 +1877,7 @@ export const AiService = () => {
                               <button
                                 type="button"
                                 className="btn-feedback-refine"
-                                onClick={() => handleRefineFeedbackQuestion(idx)}
+                                onClick={() => handleRefineFeedbackQuestion(idx, turnIndex)}
                                 disabled={isStreaming}
                               >
                                 질문 보완하여 다시 질문

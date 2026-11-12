@@ -469,5 +469,27 @@ describe('AnswerFeedback', () => {
       );
     });
   });
+
+  describe('SPEC-100: forceOpen 제어 prop', () => {
+    it('forceOpen이 true로 전달되면 컴포넌트 내부가 즉시 펼쳐진 상태로 렌더링되고 폼이 초기화된다', () => {
+      render(<AnswerFeedback onSubmit={vi.fn()} forceOpen={true} />);
+
+      expect(screen.getByTestId('answer-feedback')).not.toHaveClass('collapsed');
+      expect(screen.getByText('정확도')).toBeInTheDocument();
+      expect(screen.getByText('유용성')).toBeInTheDocument();
+    });
+
+    it('접혀 있던 컴포넌트에 forceOpen이 true로 변경되면 펼쳐지고 포커스가 이동한다', () => {
+      const { rerender } = render(<AnswerFeedback onSubmit={vi.fn()} forceOpen={false} />);
+
+      expect(screen.getByText('이 답변을 평가하기')).toBeInTheDocument();
+
+      rerender(<AnswerFeedback onSubmit={vi.fn()} forceOpen={true} />);
+
+      expect(screen.getByText('정확도')).toBeInTheDocument();
+      expect(screen.getByTestId('answer-feedback')).toHaveFocus();
+    });
+  });
 });
+
 

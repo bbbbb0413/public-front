@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { AnswerFeedbackOut } from '../api/ai';
 
 const RATINGS = [1, 2, 3, 4, 5] as const;
@@ -62,6 +62,7 @@ interface Props {
   }) => Promise<void>;
   onDelete?: () => Promise<void>;
   onSuccess?: (isUpdate: boolean) => void;
+  forceOpen?: boolean;
 }
 
 const getAccuracyClass = (accuracy: number): string => {
@@ -109,8 +110,15 @@ const RatingScale = ({ legend, name, labels, value, onChange }: ScaleProps) => (
  * 이미 평가한 답변이면 접힌 상태로 결과만 보여주고, 눌러서 다시 고칠 수 있다.
  * 다시 제출하면 서버가 기존 평가를 갱신한다.
  */
-export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Props) => {
-  const [isOpen, setIsOpen] = useState(false);
+export const AnswerFeedback = ({
+  existing,
+  onSubmit,
+  onDelete,
+  onSuccess,
+  forceOpen,
+}: Props) => {
+  const [isOpen, setIsOpen] = useState(Boolean(forceOpen));
+  const containerRef = useRef<HTMLDivElement>(null);
   const [deleted, setDeleted] = useState(false);
   const [prevExisting, setPrevExisting] = useState(existing);
 
@@ -146,6 +154,25 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
     setSelectedReasons(parseReasonsFromComment(effectiveExisting?.comment ?? ''));
     setError(null);
   };
+
+  const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
+  if (forceOpen !== prevForceOpen) {
+    setPrevForceOpen(forceOpen);
+    if (forceOpen) {
+      setIsOpen(true);
+      setAccuracy(effectiveExisting?.accuracy ?? null);
+      setHelpfulness(effectiveExisting?.helpfulness ?? null);
+      setComment(effectiveExisting?.comment ?? '');
+      setSelectedReasons(parseReasonsFromComment(effectiveExisting?.comment ?? ''));
+      setError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (forceOpen && isOpen) {
+      containerRef.current?.focus();
+    }
+  }, [forceOpen, isOpen]);
 
   const handleOpen = () => {
     resetForm();
@@ -254,7 +281,12 @@ export const AnswerFeedback = ({ existing, onSubmit, onDelete, onSuccess }: Prop
   }
 
   return (
-    <div className="answer-feedback" data-testid="answer-feedback">
+    <div
+      className="answer-feedback"
+      data-testid="answer-feedback"
+      ref={containerRef}
+      tabIndex={-1}
+    >
       <RatingScale
         legend="정확도"
         name="accuracy"

@@ -1500,11 +1500,12 @@
   cursor: not-allowed;
 }
 
-/* ── 근거 부재 경고 배너 (SPEC-059) ── */
+/* ── 근거 부재 경고 배너 (SPEC-059, SPEC-100) ── */
 .ungrounded-warning {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: space-between;
+  gap: 0.6rem;
   margin-bottom: 0.6rem;
   padding: 0.45rem 0.75rem;
   background: rgba(245, 158, 11, 0.12);
@@ -1513,6 +1514,13 @@
   font-size: 0.8rem;
   font-weight: 500;
   color: #fbbf24;
+}
+
+.ungrounded-warning-content {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
 }
 
 .ungrounded-warning-icon {
@@ -1525,7 +1533,24 @@
   line-height: 1.35;
 }
 
-/* ── 저신뢰도 경고 배너 및 질문 구체화 (SPEC-093) ── */
+.ungrounded-warning-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.ungrounded-warning .btn-refine-question {
+  background: rgba(245, 158, 11, 0.85);
+  border: 1px solid rgba(245, 158, 11, 0.9);
+}
+
+.ungrounded-warning .btn-refine-question:hover:not(:disabled) {
+  background: #d97706;
+  border-color: #b45309;
+}
+
+/* ── 저신뢰도 경고 배너 및 질문 구체화 (SPEC-093, SPEC-100) ── */
 .message-bubble.has-low-confidence {
   border: 1px solid rgba(239, 68, 68, 0.45);
 }
@@ -1578,6 +1603,13 @@
   color: #fca5a5;
 }
 
+.low-confidence-warning-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
 .btn-refine-question {
   display: inline-flex;
   align-items: center;
@@ -1600,6 +1632,32 @@
 }
 
 .btn-refine-question:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-warning-feedback {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-warning-feedback:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-warning-feedback:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
