@@ -489,6 +489,68 @@ describe('AnswerFeedback', () => {
       expect(screen.getByText('정확도')).toBeInTheDocument();
       expect(screen.getByTestId('answer-feedback')).toHaveFocus();
     });
+
+    it('폼이 열린 상태에서 취소를 누르면 onClose 콜백이 호출된다', () => {
+      const onClose = vi.fn();
+      render(<AnswerFeedback onSubmit={vi.fn()} forceOpen={true} onClose={onClose} />);
+
+      expect(screen.getByTestId('answer-feedback')).not.toHaveClass('collapsed');
+      fireEvent.click(screen.getByRole('button', { name: '취소' }));
+
+      expect(screen.getByTestId('answer-feedback')).toHaveClass('collapsed');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('제출 성공 시 onClose 콜백이 호출된다', async () => {
+      const onClose = vi.fn();
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      render(<AnswerFeedback onSubmit={onSubmit} forceOpen={true} onClose={onClose} />);
+
+      pick('정확도', 4);
+      pick('유용성', 5);
+      fireEvent.click(screen.getByRole('button', { name: '평가 제출' }));
+
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('평가 삭제 성공 시 onClose 콜백이 호출된다', async () => {
+      const onClose = vi.fn();
+      const onDelete = vi.fn().mockResolvedValue(undefined);
+      render(
+        <AnswerFeedback
+          existing={existing}
+          onSubmit={vi.fn()}
+          onDelete={onDelete}
+          forceOpen={true}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '평가 삭제' }));
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('forceOpen이 false인 상태에서 사용자가 수정 버튼으로 폼을 열었을 때 컨테이너 포커스 이동이 일어나지 않는다', () => {
+      render(
+        <AnswerFeedback
+          existing={existing}
+          onSubmit={vi.fn()}
+          forceOpen={false}
+        />,
+      );
+
+      const toggleBtn = screen.getByRole('button', { name: /수정/ });
+      toggleBtn.focus();
+      expect(toggleBtn).toHaveFocus();
+
+      fireEvent.click(toggleBtn);
+      expect(screen.getByTestId('answer-feedback')).not.toHaveClass('collapsed');
+      expect(screen.getByTestId('answer-feedback')).not.toHaveFocus();
+    });
   });
 });
 

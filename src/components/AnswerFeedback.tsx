@@ -62,6 +62,7 @@ interface Props {
   }) => Promise<void>;
   onDelete?: () => Promise<void>;
   onSuccess?: (isUpdate: boolean) => void;
+  onClose?: () => void;
   forceOpen?: boolean;
 }
 
@@ -115,6 +116,7 @@ export const AnswerFeedback = ({
   onSubmit,
   onDelete,
   onSuccess,
+  onClose,
   forceOpen,
 }: Props) => {
   const [isOpen, setIsOpen] = useState(Boolean(forceOpen));
@@ -182,6 +184,7 @@ export const AnswerFeedback = ({
   const handleCancel = () => {
     resetForm();
     setIsOpen(false);
+    onClose?.();
   };
 
   const handleAccuracyChange = (val: number) => {
@@ -222,6 +225,7 @@ export const AnswerFeedback = ({
       setDeleted(false);
       setIsOpen(false);
       onSuccess?.(isUpdate);
+      onClose?.();
     } catch {
       // 네트워크 오류로 평가가 날아가면 사용자는 다시 쓸 마음을 잃는다.
       // 입력값은 그대로 두고 재시도만 안내한다.
@@ -243,6 +247,7 @@ export const AnswerFeedback = ({
       setComment('');
       setSelectedReasons([]);
       setIsOpen(false);
+      onClose?.();
     } catch {
       setError('평가를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {

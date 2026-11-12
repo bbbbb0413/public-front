@@ -11146,6 +11146,75 @@ describe('AiService Component', () => {
       expect(within(feedbackSections[1]).getByText('정확도')).toBeInTheDocument();
     });
 
+    it('경고 배너 [답변 평가] 클릭 → 취소 → 다시 [답변 평가] 클릭 시 폼이 다시 정상적으로 펼쳐진다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-reopen', title: '재오픈 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-reopen',
+        title: '재오픈 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 1', createdAt: '2026-08-28T01:00:00Z' },
+          {
+            role: 'assistant',
+            content: '근거 미발견 답변',
+            confidence: 0,
+            missing: [],
+            sources: [],
+            createdAt: '2026-08-28T01:00:01Z',
+          },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('재오픈 세션'));
+      });
+
+      const ungroundedWarning = screen.getByTestId('ungrounded-warning');
+      const feedbackBtn = within(ungroundedWarning).getByRole('button', { name: '답변 평가' });
+      const feedbackSection = screen.getByTestId('answer-feedback');
+
+      // 1. 초기: 접혀 있음
+      expect(feedbackSection).toHaveClass('collapsed');
+
+      // 2. 1차 [답변 평가] 클릭: 열림
+      await act(async () => {
+        fireEvent.click(feedbackBtn);
+      });
+      expect(feedbackSection).not.toHaveClass('collapsed');
+      expect(within(feedbackSection).getByText('정확도')).toBeInTheDocument();
+
+      // 3. 취소 클릭: 닫힘
+      const cancelBtn = within(feedbackSection).getByRole('button', { name: '취소' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+      expect(feedbackSection).toHaveClass('collapsed');
+
+      // 4. 2차 [답변 평가] 클릭: 다시 열려야 함
+      await act(async () => {
+        fireEvent.click(feedbackBtn);
+      });
+      expect(feedbackSection).not.toHaveClass('collapsed');
+      expect(within(feedbackSection).getByText('정확도')).toBeInTheDocument();
+      expect(feedbackSection).toHaveFocus();
+    });
+
     it('불만족 피드백에 사유 태그가 저장된 상태에서 [질문 보완하여 다시 질문] 클릭 시 사유 태그가 포함된 형식으로 복원된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([

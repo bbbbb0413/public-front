@@ -463,6 +463,15 @@ export const AiService = () => {
     }));
   };
 
+  const handleCloseFeedback = (turnIndex: number) => {
+    setActiveFeedbackTurns((prev) => {
+      if (!prev[turnIndex]) return prev;
+      const next = { ...prev };
+      delete next[turnIndex];
+      return next;
+    });
+  };
+
   const handleLoadSession = async (sid: string) => {
     try {
       const detail = await getSessionDetail(sid);
@@ -1868,6 +1877,7 @@ export const AiService = () => {
                               existing={feedbackByTurn[turnIndex]}
                               onSubmit={(input) => handleSubmitFeedback(turnIndex, input)}
                               onDelete={() => handleDeleteFeedback(turnIndex)}
+                              onClose={() => handleCloseFeedback(turnIndex)}
                               forceOpen={Boolean(activeFeedbackTurns[turnIndex])}
                             />
                           )}
