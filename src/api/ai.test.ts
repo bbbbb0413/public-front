@@ -86,6 +86,32 @@ describe('AI Service API (Gateway 경유)', () => {
     expect(result[0].errorMessage).toBe('인제스트 차단: 시스템 프롬프트 유출 시도 감지');
   });
 
+  it('QA: getDocuments should handle null or undefined errorMessage in response safely', async () => {
+    const mockDocs = [
+      {
+        id: 'doc-legacy',
+        fileName: 'legacy.pdf',
+        status: 'failed',
+        chunkCount: 0,
+        createdAt: '2026-09-02T00:00:00.000Z',
+        errorMessage: null,
+      },
+      {
+        id: 'doc-processed',
+        fileName: 'processed.pdf',
+        status: 'processed',
+        chunkCount: 10,
+        createdAt: '2026-09-02T00:00:00.000Z',
+      },
+    ];
+    mockAxios.get.mockResolvedValueOnce({ data: mockDocs });
+
+    const result = await getDocuments();
+    expect(result).toHaveLength(2);
+    expect(result[0].errorMessage).toBeNull();
+    expect(result[1].errorMessage).toBeUndefined();
+  });
+
   it('uploadDocument should upload a file via multipart/form-data to the knowledge job endpoint', async () => {
     const mockResponse = { jobId: 'job-1' };
     mockAxios.post.mockResolvedValueOnce({ data: mockResponse });
