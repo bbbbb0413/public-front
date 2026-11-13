@@ -11552,4 +11552,250 @@ describe('AiService Component', () => {
       expect(input).toHaveFocus();
     });
   });
+
+  describe('SPEC-101: 지식베이스 문서 인제스트 실패 원인 저장 및 에러 상세 노출', () => {
+    it('Given errorMessage가 포함된 실패 문서가 있을 때 When 문서 목록이 렌더링되면 Then 상태 배지의 title 속성과 .doc-error-hint 요소에 해당 에러 메시지가 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-failed-custom',
+          fileName: 'blocked-prompt.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: '인제스트 차단: 프롬프트 인젝션 패턴이 감지되었습니다.',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const failedBadge = screen.getByText('failed');
+      expect(failedBadge).toHaveClass('status-badge', 'failed');
+      expect(failedBadge).toHaveAttribute('title', '인제스트 차단: 프롬프트 인젝션 패턴이 감지되었습니다.');
+
+      const errorHint = screen.getByText('인제스트 차단: 프롬프트 인젝션 패턴이 감지되었습니다.');
+      expect(errorHint).toHaveClass('doc-error-hint');
+      expect(errorHint).toHaveAttribute('title', '인제스트 차단: 프롬프트 인젝션 패턴이 감지되었습니다.');
+    });
+
+    it('Given errorMessage가 없는 레거시 실패 문서일 때 When 문서 목록이 렌더링되면 Then 기본 폴백 메시지가 title 속성과 .doc-error-hint 요소에 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-failed-legacy',
+          fileName: 'legacy-fail.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const failedBadge = screen.getByText('failed');
+      expect(failedBadge).toHaveClass('status-badge', 'failed');
+      expect(failedBadge).toHaveAttribute('title', '문서 인제스트 처리에 실패했습니다.');
+
+      const errorHint = screen.getByText('문서 인제스트 처리에 실패했습니다.');
+      expect(errorHint).toHaveClass('doc-error-hint');
+      expect(errorHint).toHaveAttribute('title', '문서 인제스트 처리에 실패했습니다.');
+    });
+
+    it('Given 실패 문서에 대해 재시도를 진행 중일 때 When 상태 셀을 확인하면 Then doc-error-hint가 숨겨진다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-retry-in-progress',
+          fileName: 'retrying-file.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: '네트워크 일시 오류로 인한 인제스트 실패',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      let resolveRetry: (value: aiApi.DocumentItem) => void = () => {};
+      const retryPromise = new Promise<aiApi.DocumentItem>((resolve) => {
+        resolveRetry = resolve;
+      });
+      vi.mocked(aiApi.retryDocument).mockReturnValueOnce(retryPromise);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('네트워크 일시 오류로 인한 인제스트 실패')).toBeInTheDocument();
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByRole('button', { name: '재시도 중...' })).toBeDisabled();
+      expect(screen.queryByText('네트워크 일시 오류로 인한 인제스트 실패')).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveRetry({
+          id: 'doc-retry-in-progress',
+          fileName: 'retrying-file.pdf',
+          status: 'processed',
+          chunkCount: 4,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        });
+      });
+    });
+
+    it('Given 실패 문서에 대해 재시도가 완료되어 문서 목록이 갱신되었을 때 Then status가 processed로 변경되고 에러 힌트가 제거된다', async () => {
+      const initialDocs = [
+        {
+          id: 'doc-retry-success',
+          fileName: 'retry-success.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: '파싱 에러: 파일 구조 손상',
+        },
+      ];
+      const updatedDocs = [
+        {
+          id: 'doc-retry-success',
+          fileName: 'retry-success.pdf',
+          status: 'processed',
+          chunkCount: 6,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getDocuments)
+        .mockResolvedValueOnce(initialDocs)
+        .mockResolvedValueOnce(updatedDocs);
+
+      vi.mocked(aiApi.retryDocument).mockResolvedValueOnce(updatedDocs[0]);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('파싱 에러: 파일 구조 손상')).toBeInTheDocument();
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(aiApi.retryDocument).toHaveBeenCalledWith('doc-retry-success');
+      expect(aiApi.getDocuments).toHaveBeenCalledTimes(2);
+
+      expect(screen.getByText('processed')).toBeInTheDocument();
+      expect(screen.queryByText('파싱 에러: 파일 구조 손상')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '재시도' })).not.toBeInTheDocument();
+    });
+
+    it('QA: Given 백엔드에서 errorMessage가 명시적 null 또는 빈 문자열("")로 전달된 실패 문서일 때 When 렌더링되면 Then 오류 없이 기본 폴백 메시지가 title 및 .doc-error-hint에 안전하게 표시된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-failed-null',
+          fileName: 'null-error.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: null as unknown as undefined,
+        },
+        {
+          id: 'doc-failed-empty',
+          fileName: 'empty-error.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: '',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const failedBadges = screen.getAllByText('failed');
+      expect(failedBadges).toHaveLength(2);
+      expect(failedBadges[0]).toHaveAttribute('title', '문서 인제스트 처리에 실패했습니다.');
+      expect(failedBadges[1]).toHaveAttribute('title', '문서 인제스트 처리에 실패했습니다.');
+
+      const errorHints = screen.getAllByText('문서 인제스트 처리에 실패했습니다.');
+      expect(errorHints).toHaveLength(2);
+      expect(errorHints[0]).toHaveClass('doc-error-hint');
+      expect(errorHints[1]).toHaveClass('doc-error-hint');
+    });
+
+    it('QA: Given 정상 상태(processed, processing)인 문서가 렌더링될 때 When 상태 셀을 확인하면 Then 상태 배지에 title 속성이 없고 .doc-error-hint 요소가 렌더링되지 않는다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-processed',
+          fileName: 'normal-processed.pdf',
+          status: 'processed',
+          chunkCount: 5,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+        {
+          id: 'doc-processing',
+          fileName: 'normal-processing.pdf',
+          status: 'processing',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      const processedBadge = screen.getByText('processed');
+      expect(processedBadge).not.toHaveAttribute('title');
+
+      const processingBadge = screen.getByText('processing');
+      expect(processingBadge).not.toHaveAttribute('title');
+
+      expect(document.querySelector('.doc-error-hint')).toBeNull();
+    });
+
+    it('QA: Given 실패 문서에 대해 재시도를 시도했으나 재시도 API가 실패했을 때 When 재시도 요청이 끝나면 Then retryingDocId가 해제되어 .doc-error-hint 요소가 다시 표시되고 전체 에러 메시지가 노출된다', async () => {
+      const mockDocs = [
+        {
+          id: 'doc-retry-fail',
+          fileName: 'retry-fail.pdf',
+          status: 'failed',
+          chunkCount: 0,
+          createdAt: '2026-09-02T00:00:00.000Z',
+          errorMessage: '원본 인제스트 에러 메시지',
+        },
+      ];
+      vi.mocked(aiApi.getDocuments).mockResolvedValueOnce(mockDocs);
+      vi.mocked(aiApi.retryDocument).mockRejectedValueOnce({
+        response: { data: { message: '재시도 서버 처리 실패' } },
+      });
+
+      await act(async () => {
+        render(<AiService />);
+      });
+
+      expect(screen.getByText('원본 인제스트 에러 메시지')).toBeInTheDocument();
+
+      const retryBtn = screen.getByRole('button', { name: '재시도' });
+      await act(async () => {
+        fireEvent.click(retryBtn);
+      });
+
+      expect(screen.getByText('재시도 서버 처리 실패')).toBeInTheDocument();
+      // 재시도 실패 후 retryingDocId가 null로 초기화되어 에러 힌트가 다시 렌더링됨
+      const hint = screen.getByText('원본 인제스트 에러 메시지');
+      expect(hint).toBeInTheDocument();
+      expect(hint).toHaveClass('doc-error-hint');
+      expect(screen.getByRole('button', { name: '재시도' })).not.toBeDisabled();
+    });
+  });
 });

@@ -45,6 +45,7 @@ interface DocumentInfo {
   createdAt: string;
   step?: string;
   progress?: number;
+  errorMessage?: string;
 }
 
 interface ChatMessage {
@@ -1170,7 +1171,20 @@ export const AiService = () => {
                         <tr key={doc.id}>
                           <td className="doc-name">{doc.fileName}</td>
                           <td>
-                            <span className={`status-badge ${doc.status}`}>{statusContent}</span>
+                            <span
+                              className={`status-badge ${doc.status}`}
+                              title={isFailed ? (doc.errorMessage || '문서 인제스트 처리에 실패했습니다.') : undefined}
+                            >
+                              {statusContent}
+                            </span>
+                            {isFailed && retryingDocId !== doc.id && (
+                              <span
+                                className="doc-error-hint"
+                                title={doc.errorMessage || '문서 인제스트 처리에 실패했습니다.'}
+                              >
+                                {doc.errorMessage || '문서 인제스트 처리에 실패했습니다.'}
+                              </span>
+                            )}
                           </td>
                           <td>
                             {isCompleted ? (

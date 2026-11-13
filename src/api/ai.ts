@@ -118,6 +118,7 @@ export interface DocumentItem {
   status: string;
   chunkCount: number;
   createdAt: string;
+  errorMessage?: string;
 }
 
 export const getDocuments = async (): Promise<DocumentItem[]> => {

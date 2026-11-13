@@ -377,6 +377,18 @@
   border: 1px solid hsla(350, 80%, 50%, 0.3);
 }
 
+.doc-error-hint {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: hsl(350, 90%, 75%);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
 .doc-actions {
   display: flex;
   align-items: center;
