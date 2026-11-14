@@ -11798,4 +11798,466 @@ describe('AiService Component', () => {
       expect(screen.getByRole('button', { name: '재시도' })).not.toBeDisabled();
     });
   });
+
+  describe('SPEC-102: 보관함 답변 클릭 시 해당 턴 위치 이동·강조 표시 및 보관 항목 삭제 확인 대화상자 추가', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-spec102', nickName: 'Tester102' },
+      token: 'jwt-token-102',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    const mockBookmarks: aiApi.BookmarkItem[] = [
+      {
+        id: 'bm-answer-1',
+        sessionId: 'sess-spec102',
+        turnIndex: 1,
+        title: '환불 규정 문의 대화',
+        content: '환불 규정에 관한 AI 답변 내용입니다.',
+        createdAt: '2026-11-15T00:00:00Z',
+      },
+      {
+        id: 'bm-session-1',
+        sessionId: 'sess-spec102',
+        title: '전체 대화 보관 항목',
+        content: undefined,
+        createdAt: '2026-11-15T00:00:00Z',
+      },
+    ];
+
+    const mockSessionDetail: aiApi.SessionDetailOut = {
+      sessionId: 'sess-spec102',
+      title: '환불 규정 문의 대화',
+      createdAt: '2026-11-15T00:00:00Z',
+      updatedAt: '2026-11-15T00:00:01Z',
+      turns: [
+        { role: 'user', content: '환불은 어떻게 하나요?', createdAt: '2026-11-15T00:00:00Z' },
+        { role: 'assistant', content: '환불 규정에 관한 AI 답변 내용입니다.', createdAt: '2026-11-15T00:00:01Z' },
+      ],
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    });
+
+    const openChatAndGoToBookmarks = async (bookmarks = mockBookmarks) => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue(bookmarks);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSessionDetail);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+    };
+
+    it('보관 항목의 유형(turnIndex 유무)에 따라 [답변 보관] 및 [대화 전체] 배지가 올바르게 렌더링된다', async () => {
+      await openChatAndGoToBookmarks();
+
+      const answerBadge = screen.getByText('답변 보관');
+      expect(answerBadge).toBeInTheDocument();
+      expect(answerBadge).toHaveClass('bookmark-type-badge');
+      expect(answerBadge).toHaveClass('badge-answer-bookmark');
+
+      const sessionBadge = screen.getByText('대화 전체');
+      expect(sessionBadge).toBeInTheDocument();
+      expect(sessionBadge).toHaveClass('bookmark-type-badge');
+      expect(sessionBadge).toHaveClass('badge-session-bookmark');
+    });
+
+    it('백엔드에서 turnIndex가 null로 반환된 세션 단위 북마크에 [대화 전체] 배지가 표시된다', async () => {
+      const bookmarksWithNullTurnIndex = [
+        {
+          id: 'bm-null-turn',
+          sessionId: 'sess-spec102',
+          turnIndex: null,
+          title: 'null 턴인덱스 세션 보관',
+          content: '세션 요약 내용',
+          createdAt: '2026-11-15T00:00:00Z',
+        },
+      ];
+      await openChatAndGoToBookmarks(bookmarksWithNullTurnIndex);
+
+      const sessionBadge = screen.getByText('대화 전체');
+      expect(sessionBadge).toBeInTheDocument();
+      expect(sessionBadge).toHaveClass('bookmark-type-badge');
+      expect(sessionBadge).toHaveClass('badge-session-bookmark');
+      expect(screen.queryByText('답변 보관')).not.toBeInTheDocument();
+    });
+
+    it('보관함에서 turnIndex가 포함된 답변 북마크 클릭 시 해당 세션을 불러오고 대상 턴 요소로 스크롤 및 highlighted-turn 클래스를 적용한 뒤 2초 후 해제한다', async () => {
+      vi.useFakeTimers();
+      try {
+        await openChatAndGoToBookmarks();
+
+        const answerItem = screen.getByText('환불 규정에 관한 AI 답변 내용입니다.').closest('li');
+        expect(answerItem).not.toBeNull();
+
+        await act(async () => {
+          fireEvent.click(answerItem!);
+        });
+
+        expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-spec102');
+
+        const turnElement = document.querySelector('[data-turn-index="1"]');
+        expect(turnElement).not.toBeNull();
+        expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+          behavior: 'smooth',
+          block: 'center',
+        });
+
+        // 턴 요소 혹은 버블에 highlighted-turn 클래스가 부여되어 있어야 함
+        const highlightedEl = document.querySelector('.highlighted-turn');
+        expect(highlightedEl).not.toBeNull();
+        expect(highlightedEl?.getAttribute('data-turn-index')).toBe('1');
+
+        // 2초(2000ms) 경과 후 하이라이트 해제 확인
+        act(() => {
+          vi.advanceTimersByTime(2000);
+        });
+
+        expect(document.querySelector('.highlighted-turn')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('turnIndex가 없는 세션 전체 북마크 클릭 시 스크롤 및 하이라이트 없이 정상적으로 세션만 로드된다', async () => {
+      await openChatAndGoToBookmarks();
+
+      const sessionItem = screen.getByText('전체 대화 보관 항목').closest('li');
+      expect(sessionItem).not.toBeNull();
+
+      await act(async () => {
+        fireEvent.click(sessionItem!);
+      });
+
+      expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-spec102');
+      expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalledWith(
+        expect.objectContaining({ block: 'center' }),
+      );
+      expect(document.querySelector('.highlighted-turn')).toBeNull();
+    });
+
+    it('보관함 아이템 삭제 버튼(✕) 클릭 시 즉시 삭제되지 않고 확인 모달이 열린다', async () => {
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      expect(aiApi.deleteBookmark).not.toHaveBeenCalled();
+      const modal = screen.getByRole('dialog', { name: '보관 항목 삭제' });
+      expect(modal).toBeInTheDocument();
+      expect(within(modal).getByText('이 보관 항목을 삭제하시겠습니까? 삭제 후에는 복구할 수 없습니다.')).toBeInTheDocument();
+      expect(within(modal).getByText('환불 규정 문의 대화')).toBeInTheDocument();
+    });
+
+    it('삭제 대상 본문이 100자를 초과하는 긴 텍스트일 때 확인 모달에서 100자로 잘라 말줄임표(...)로 노출한다', async () => {
+      const longContent = 'A'.repeat(120);
+      const longBookmark: aiApi.BookmarkItem = {
+        id: 'bm-long',
+        sessionId: 'sess-spec102',
+        turnIndex: 0,
+        content: longContent,
+        createdAt: '2026-11-15T00:00:00Z',
+      };
+      await openChatAndGoToBookmarks([longBookmark]);
+
+      const deleteBtn = screen.getByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtn);
+      });
+
+      expect(screen.getByText(`${'A'.repeat(100)}...`)).toBeInTheDocument();
+    });
+
+    it('삭제 확인 모달에서 취소 버튼 클릭, 오버레이 클릭, 또는 Escape 키 입력 시 모달이 닫히고 삭제 API가 호출되지 않는다', async () => {
+      await openChatAndGoToBookmarks();
+
+      // 1. 취소 버튼 클릭
+      let deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      const cancelBtn = screen.getByRole('button', { name: '취소' });
+      await act(async () => {
+        fireEvent.click(cancelBtn);
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+      expect(aiApi.deleteBookmark).not.toHaveBeenCalled();
+
+      // 2. 오버레이 클릭
+      deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      const overlay = screen.getByTestId('bookmark-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+      expect(aiApi.deleteBookmark).not.toHaveBeenCalled();
+
+      // 3. Escape 키 입력
+      deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+      expect(aiApi.deleteBookmark).not.toHaveBeenCalled();
+    });
+
+    it('삭제 확인 모달에서 삭제 클릭 시 deleteBookmark API가 호출되고 모달이 닫히며 목록에서 제거되고 토스트 알림이 표시된다', async () => {
+      vi.mocked(aiApi.deleteBookmark).mockResolvedValue(undefined as unknown as void);
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      expect(aiApi.deleteBookmark).toHaveBeenCalledWith('bm-answer-1');
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+      expect(screen.queryByText('환불 규정에 관한 AI 답변 내용입니다.')).not.toBeInTheDocument();
+      expect(screen.getByText('보관 항목이 삭제되었습니다.')).toBeInTheDocument();
+    });
+
+    it('삭제 API 진행 중에는 삭제 버튼이 [삭제 중...]으로 변경되고 비활성화되며 Escape 키나 취소로 닫히지 않는다', async () => {
+      let resolveDelete: () => void = () => {};
+      const deletePromise = new Promise<void>((resolve) => {
+        resolveDelete = resolve;
+      });
+      vi.mocked(aiApi.deleteBookmark).mockReturnValue(deletePromise);
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      const cancelBtn = screen.getByRole('button', { name: '취소' });
+
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 삭제 중 상태 확인
+      expect(confirmBtn).toHaveTextContent('삭제 중...');
+      expect(confirmBtn).toBeDisabled();
+      expect(cancelBtn).toBeDisabled();
+
+      // Escape 시도 시 모달 유지
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      // 완료 후 모달 닫힘
+      await act(async () => {
+        resolveDelete();
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+    });
+
+    it('QA: 보관 항목의 제목과 내용이 모두 비어있는 경우 삭제 확인 모달에 기본 폴백 문구 [선택한 보관 항목]이 노출된다', async () => {
+      const emptyBookmarks: aiApi.BookmarkItem[] = [
+        {
+          id: 'bm-empty-1',
+          sessionId: 'sess-spec102',
+          title: '',
+          content: undefined,
+          createdAt: '2026-11-15T00:00:00Z',
+        },
+      ];
+
+      await openChatAndGoToBookmarks(emptyBookmarks);
+
+      const deleteBtn = screen.getByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+      expect(screen.getByText('선택한 보관 항목')).toBeInTheDocument();
+    });
+
+    it('QA: 삭제 확인 모달에서 deleteBookmark API 실패 시 에러 메시지가 표시되고 모달은 열려 있으며 목록에서 삭제되지 않는다', async () => {
+      vi.mocked(aiApi.deleteBookmark).mockRejectedValue(new Error('Network error'));
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 에러 메시지 확인 및 모달 유지, 목록 유지 확인
+      expect(screen.getByText('보관 항목 삭제에 실패했습니다.')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+      expect(screen.getByText('환불 규정에 관한 AI 답변 내용입니다.')).toBeInTheDocument();
+      expect(confirmBtn).not.toBeDisabled();
+      expect(confirmBtn).toHaveTextContent('삭제');
+    });
+
+    it('QA: 삭제 API 진행 중(isDeletingBookmark)일 때 오버레이 클릭 시 모달이 닫히지 않는다', async () => {
+      let resolveDelete: () => void = () => {};
+      const deletePromise = new Promise<void>((resolve) => {
+        resolveDelete = resolve;
+      });
+      vi.mocked(aiApi.deleteBookmark).mockReturnValue(deletePromise);
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 진행 중 오버레이 클릭
+      const overlay = screen.getByTestId('bookmark-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      await act(async () => {
+        resolveDelete();
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+    });
+
+    it('QA: 다른 답변 북마크를 연속 클릭 시 이전 하이라이트 타이머가 취소되고 새 턴으로 하이라이트가 갱신된다', async () => {
+      vi.useFakeTimers();
+      try {
+        const multipleBookmarks: aiApi.BookmarkItem[] = [
+          {
+            id: 'bm-answer-1',
+            sessionId: 'sess-spec102',
+            turnIndex: 1,
+            title: '첫 번째 답변 보관',
+            content: '첫 번째 AI 답변 내용',
+            createdAt: '2026-11-15T00:00:00Z',
+          },
+          {
+            id: 'bm-answer-2',
+            sessionId: 'sess-spec102',
+            turnIndex: 3,
+            title: '두 번째 답변 보관',
+            content: '두 번째 AI 답변 내용',
+            createdAt: '2026-11-15T00:00:01Z',
+          },
+        ];
+
+        const sessionDetailWithMultipleTurns: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec102',
+          title: '멀티 턴 대화',
+          createdAt: '2026-11-15T00:00:00Z',
+          updatedAt: '2026-11-15T00:00:02Z',
+          turns: [
+            { role: 'user', content: '질문 1', createdAt: '2026-11-15T00:00:00Z' },
+            { role: 'assistant', content: '첫 번째 AI 답변 내용', createdAt: '2026-11-15T00:00:01Z' },
+            { role: 'user', content: '질문 2', createdAt: '2026-11-15T00:00:02Z' },
+            { role: 'assistant', content: '두 번째 AI 답변 내용', createdAt: '2026-11-15T00:00:03Z' },
+          ],
+        };
+
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailWithMultipleTurns);
+        await openChatAndGoToBookmarks(multipleBookmarks);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailWithMultipleTurns);
+
+        // 첫 번째 답변 클릭 (고유한 title로 조회)
+        const item1 = screen.getByText('첫 번째 답변 보관').closest('li');
+        expect(item1).not.toBeNull();
+        await act(async () => {
+          fireEvent.click(item1!);
+        });
+
+        const turn1El = document.querySelector('.highlighted-turn');
+        expect(turn1El).not.toBeNull();
+        expect(turn1El?.getAttribute('data-turn-index')).toBe('1');
+
+        // 1초 후 (타이머 만료 전 2000ms 중 1000ms)
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        expect(document.querySelector('.highlighted-turn')?.getAttribute('data-turn-index')).toBe('1');
+
+        // 두 번째 답변 클릭 (이전 타이머 취소 및 새 턴 하이라이트)
+        const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+        await act(async () => {
+          fireEvent.click(bookmarkTabBtn);
+        });
+
+        const item2 = screen.getByText('두 번째 답변 보관').closest('li');
+        expect(item2).not.toBeNull();
+        await act(async () => {
+          fireEvent.click(item2!);
+        });
+
+        const turn2El = document.querySelector('.highlighted-turn');
+        expect(turn2El).not.toBeNull();
+        expect(turn2El?.getAttribute('data-turn-index')).toBe('3');
+
+        // 1.5초 경과 (첫 번째 클릭 기준 2.5초 지남, 하지만 두 번째 클릭 타이머 2000ms는 아직 만료 안 됨)
+        act(() => {
+          vi.advanceTimersByTime(1500);
+        });
+        expect(document.querySelector('.highlighted-turn')?.getAttribute('data-turn-index')).toBe('3');
+
+        // 추가 1초 경과 (두 번째 클릭 기준 2.5초 지남 -> 하이라이트 해제)
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        expect(document.querySelector('.highlighted-turn')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
