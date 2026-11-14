@@ -498,7 +498,7 @@ export const AiService = () => {
     });
   };
 
-  const handleLoadSession = async (sid: string, targetTurnIndex?: number) => {
+  const handleLoadSession = async (sid: string, targetTurnIndex?: number | null) => {
     try {
       const detail = await getSessionDetail(sid);
       if (!detail) return;
@@ -1516,10 +1516,10 @@ export const AiService = () => {
                           <div className="session-item-content">
                             <span
                               className={`bookmark-type-badge ${
-                                b.turnIndex !== undefined ? 'badge-answer-bookmark' : 'badge-session-bookmark'
+                                typeof b.turnIndex === 'number' ? 'badge-answer-bookmark' : 'badge-session-bookmark'
                               }`}
                             >
-                              {b.turnIndex !== undefined ? '답변 보관' : '대화 전체'}
+                              {typeof b.turnIndex === 'number' ? '답변 보관' : '대화 전체'}
                             </span>
                             {b.title && <span className="session-item-title">{b.title}</span>}
                             {b.content && (

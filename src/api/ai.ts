@@ -289,7 +289,7 @@ export interface SessionOut {
 export interface BookmarkItem {
   id: string;
   sessionId: string;
-  turnIndex?: number;
+  turnIndex?: number | null;
   title?: string;
   content?: string;
   note?: string;

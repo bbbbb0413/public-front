@@ -11881,6 +11881,26 @@ describe('AiService Component', () => {
       expect(sessionBadge).toHaveClass('badge-session-bookmark');
     });
 
+    it('백엔드에서 turnIndex가 null로 반환된 세션 단위 북마크에 [대화 전체] 배지가 표시된다', async () => {
+      const bookmarksWithNullTurnIndex = [
+        {
+          id: 'bm-null-turn',
+          sessionId: 'sess-spec102',
+          turnIndex: null,
+          title: 'null 턴인덱스 세션 보관',
+          content: '세션 요약 내용',
+          createdAt: '2026-11-15T00:00:00Z',
+        },
+      ];
+      await openChatAndGoToBookmarks(bookmarksWithNullTurnIndex);
+
+      const sessionBadge = screen.getByText('대화 전체');
+      expect(sessionBadge).toBeInTheDocument();
+      expect(sessionBadge).toHaveClass('bookmark-type-badge');
+      expect(sessionBadge).toHaveClass('badge-session-bookmark');
+      expect(screen.queryByText('답변 보관')).not.toBeInTheDocument();
+    });
+
     it('보관함에서 turnIndex가 포함된 답변 북마크 클릭 시 해당 세션을 불러오고 대상 턴 요소로 스크롤 및 highlighted-turn 클래스를 적용한 뒤 2초 후 해제한다', async () => {
       vi.useFakeTimers();
       try {
