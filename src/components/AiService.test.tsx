@@ -12073,5 +12073,171 @@ describe('AiService Component', () => {
       });
       expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
     });
+
+    it('QA: 보관 항목의 제목과 내용이 모두 비어있는 경우 삭제 확인 모달에 기본 폴백 문구 [선택한 보관 항목]이 노출된다', async () => {
+      const emptyBookmarks: aiApi.BookmarkItem[] = [
+        {
+          id: 'bm-empty-1',
+          sessionId: 'sess-spec102',
+          title: '',
+          content: undefined,
+          createdAt: '2026-11-15T00:00:00Z',
+        },
+      ];
+
+      await openChatAndGoToBookmarks(emptyBookmarks);
+
+      const deleteBtn = screen.getByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+      expect(screen.getByText('선택한 보관 항목')).toBeInTheDocument();
+    });
+
+    it('QA: 삭제 확인 모달에서 deleteBookmark API 실패 시 에러 메시지가 표시되고 모달은 열려 있으며 목록에서 삭제되지 않는다', async () => {
+      vi.mocked(aiApi.deleteBookmark).mockRejectedValue(new Error('Network error'));
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 에러 메시지 확인 및 모달 유지, 목록 유지 확인
+      expect(screen.getByText('보관 항목 삭제에 실패했습니다.')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+      expect(screen.getByText('환불 규정에 관한 AI 답변 내용입니다.')).toBeInTheDocument();
+      expect(confirmBtn).not.toBeDisabled();
+      expect(confirmBtn).toHaveTextContent('삭제');
+    });
+
+    it('QA: 삭제 API 진행 중(isDeletingBookmark)일 때 오버레이 클릭 시 모달이 닫히지 않는다', async () => {
+      let resolveDelete: () => void = () => {};
+      const deletePromise = new Promise<void>((resolve) => {
+        resolveDelete = resolve;
+      });
+      vi.mocked(aiApi.deleteBookmark).mockReturnValue(deletePromise);
+
+      await openChatAndGoToBookmarks();
+
+      const deleteBtns = screen.getAllByRole('button', { name: '보관 항목 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteBtns[0]);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 진행 중 오버레이 클릭
+      const overlay = screen.getByTestId('bookmark-delete-modal-overlay');
+      await act(async () => {
+        fireEvent.click(overlay);
+      });
+
+      expect(screen.getByRole('dialog', { name: '보관 항목 삭제' })).toBeInTheDocument();
+
+      await act(async () => {
+        resolveDelete();
+      });
+      expect(screen.queryByRole('dialog', { name: '보관 항목 삭제' })).not.toBeInTheDocument();
+    });
+
+    it('QA: 다른 답변 북마크를 연속 클릭 시 이전 하이라이트 타이머가 취소되고 새 턴으로 하이라이트가 갱신된다', async () => {
+      vi.useFakeTimers();
+      try {
+        const multipleBookmarks: aiApi.BookmarkItem[] = [
+          {
+            id: 'bm-answer-1',
+            sessionId: 'sess-spec102',
+            turnIndex: 1,
+            title: '첫 번째 답변 보관',
+            content: '첫 번째 AI 답변 내용',
+            createdAt: '2026-11-15T00:00:00Z',
+          },
+          {
+            id: 'bm-answer-2',
+            sessionId: 'sess-spec102',
+            turnIndex: 3,
+            title: '두 번째 답변 보관',
+            content: '두 번째 AI 답변 내용',
+            createdAt: '2026-11-15T00:00:01Z',
+          },
+        ];
+
+        const sessionDetailWithMultipleTurns: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec102',
+          title: '멀티 턴 대화',
+          createdAt: '2026-11-15T00:00:00Z',
+          updatedAt: '2026-11-15T00:00:02Z',
+          turns: [
+            { role: 'user', content: '질문 1', createdAt: '2026-11-15T00:00:00Z' },
+            { role: 'assistant', content: '첫 번째 AI 답변 내용', createdAt: '2026-11-15T00:00:01Z' },
+            { role: 'user', content: '질문 2', createdAt: '2026-11-15T00:00:02Z' },
+            { role: 'assistant', content: '두 번째 AI 답변 내용', createdAt: '2026-11-15T00:00:03Z' },
+          ],
+        };
+
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailWithMultipleTurns);
+        await openChatAndGoToBookmarks(multipleBookmarks);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailWithMultipleTurns);
+
+        // 첫 번째 답변 클릭 (고유한 title로 조회)
+        const item1 = screen.getByText('첫 번째 답변 보관').closest('li');
+        expect(item1).not.toBeNull();
+        await act(async () => {
+          fireEvent.click(item1!);
+        });
+
+        const turn1El = document.querySelector('.highlighted-turn');
+        expect(turn1El).not.toBeNull();
+        expect(turn1El?.getAttribute('data-turn-index')).toBe('1');
+
+        // 1초 후 (타이머 만료 전 2000ms 중 1000ms)
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        expect(document.querySelector('.highlighted-turn')?.getAttribute('data-turn-index')).toBe('1');
+
+        // 두 번째 답변 클릭 (이전 타이머 취소 및 새 턴 하이라이트)
+        const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+        await act(async () => {
+          fireEvent.click(bookmarkTabBtn);
+        });
+
+        const item2 = screen.getByText('두 번째 답변 보관').closest('li');
+        expect(item2).not.toBeNull();
+        await act(async () => {
+          fireEvent.click(item2!);
+        });
+
+        const turn2El = document.querySelector('.highlighted-turn');
+        expect(turn2El).not.toBeNull();
+        expect(turn2El?.getAttribute('data-turn-index')).toBe('3');
+
+        // 1.5초 경과 (첫 번째 클릭 기준 2.5초 지남, 하지만 두 번째 클릭 타이머 2000ms는 아직 만료 안 됨)
+        act(() => {
+          vi.advanceTimersByTime(1500);
+        });
+        expect(document.querySelector('.highlighted-turn')?.getAttribute('data-turn-index')).toBe('3');
+
+        // 추가 1초 경과 (두 번째 클릭 기준 2.5초 지남 -> 하이라이트 해제)
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        expect(document.querySelector('.highlighted-turn')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
