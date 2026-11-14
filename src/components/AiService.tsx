@@ -200,6 +200,12 @@ export const AiService = () => {
   const [deletingSession, setDeletingSession] = useState<{ sessionId: string; title: string } | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
 
+  const [highlightedTurnIndex, setHighlightedTurnIndex] = useState<number | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingScrollTurnIndexRef = useRef<number | null>(null);
+  const [deletingBookmark, setDeletingBookmark] = useState<{ id: string; title?: string; content?: string } | null>(null);
+  const [isDeletingBookmark, setIsDeletingBookmark] = useState(false);
+
   const [viewingChunksDoc, setViewingChunksDoc] = useState<
     DocumentInfo | { id: string; fileName: string; chunkCount?: number } | null
   >(null);
@@ -335,14 +341,33 @@ export const AiService = () => {
     }
   };
 
-  const handleDeleteBookmark = async (bookmarkId: string, e: React.MouseEvent) => {
+  const handleDeleteBookmarkClick = (bookmark: BookmarkItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    setDeletingBookmark({
+      id: bookmark.id,
+      title: bookmark.title,
+      content: bookmark.content,
+    });
+  };
+
+  const handleCancelDeleteBookmark = () => {
+    if (isDeletingBookmark) return;
+    setDeletingBookmark(null);
+  };
+
+  const handleConfirmDeleteBookmark = async () => {
+    if (!deletingBookmark || isDeletingBookmark) return;
+    const bid = deletingBookmark.id;
+    setIsDeletingBookmark(true);
     try {
-      await deleteBookmark(bookmarkId);
-      setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
+      await deleteBookmark(bid);
+      setBookmarks((prev) => prev.filter((b) => b.id !== bid));
+      setDeletingBookmark(null);
       showBookmarkToast('보관 항목이 삭제되었습니다.');
     } catch {
       setErrorMsg('보관 항목 삭제에 실패했습니다.');
+    } finally {
+      setIsDeletingBookmark(false);
     }
   };
 
@@ -473,7 +498,7 @@ export const AiService = () => {
     });
   };
 
-  const handleLoadSession = async (sid: string) => {
+  const handleLoadSession = async (sid: string, targetTurnIndex?: number) => {
     try {
       const detail = await getSessionDetail(sid);
       if (!detail) return;
@@ -499,6 +524,27 @@ export const AiService = () => {
       setFileViewErrors({});
       setCurrentProgress(null);
       setCopiedIndex(null);
+
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+
+      if (typeof targetTurnIndex === 'number') {
+        setHighlightedTurnIndex(targetTurnIndex);
+        pendingScrollTurnIndexRef.current = targetTurnIndex;
+        highlightTimerRef.current = setTimeout(() => {
+          setHighlightedTurnIndex(null);
+        }, 2000);
+
+        const el = document.querySelector(`[data-turn-index="${targetTurnIndex}"]`);
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } else {
+        setHighlightedTurnIndex(null);
+        pendingScrollTurnIndexRef.current = null;
+      }
     } catch {
       setErrorMsg('세션을 불러오는 데 실패했습니다.');
     }
@@ -714,6 +760,34 @@ export const AiService = () => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingSession, isDeletingSession]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pendingScrollTurnIndexRef.current !== null) {
+      const targetIdx = pendingScrollTurnIndexRef.current;
+      pendingScrollTurnIndexRef.current = null;
+      const el = document.querySelector(`[data-turn-index="${targetIdx}"]`);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [chatLog]);
+
+  useEffect(() => {
+    if (!deletingBookmark) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isDeletingBookmark) {
+        setDeletingBookmark(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [deletingBookmark, isDeletingBookmark]);
 
   const handleOpenChunks = async (
     doc: DocumentInfo | { id: string; fileName: string; chunkCount?: number },
@@ -1437,9 +1511,16 @@ export const AiService = () => {
                         <li
                           key={b.id}
                           className={`session-item bookmark-item${sessionId === b.sessionId ? ' active' : ''}`}
-                          onClick={() => handleLoadSession(b.sessionId)}
+                          onClick={() => handleLoadSession(b.sessionId, b.turnIndex)}
                         >
                           <div className="session-item-content">
+                            <span
+                              className={`bookmark-type-badge ${
+                                b.turnIndex !== undefined ? 'badge-answer-bookmark' : 'badge-session-bookmark'
+                              }`}
+                            >
+                              {b.turnIndex !== undefined ? '답변 보관' : '대화 전체'}
+                            </span>
                             {b.title && <span className="session-item-title">{b.title}</span>}
                             {b.content && (
                               <span className="session-item-snippet">{b.content}</span>
@@ -1453,7 +1534,7 @@ export const AiService = () => {
                           <div className="session-item-actions">
                             <button
                               className="btn-delete-session"
-                              onClick={(e) => handleDeleteBookmark(b.id, e)}
+                              onClick={(e) => handleDeleteBookmarkClick(b, e)}
                               aria-label="보관 항목 삭제"
                               title="보관 삭제"
                             >
@@ -1507,9 +1588,11 @@ export const AiService = () => {
                     <div
                       key={idx}
                       className={`chat-message ${msg.sender}${msg.isError ? ' error' : ''}${msg.isCancelled ? ' cancelled' : ''}`}
+                      data-turn-index={turnIndex}
                     >
                       <div
-                        className={`message-bubble${isAi && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}`}
+                        className={`message-bubble${isAi && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
+                        data-turn-index={turnIndex}
                       >
                         {isAi && msg.missing && msg.missing.length > 0 && (
                           <div className="missing-warning-badge" data-testid="missing-warning-badge">
@@ -2182,6 +2265,56 @@ export const AiService = () => {
                 disabled={isDeletingSession}
               >
                 {isDeletingSession ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 보관 항목 삭제 확인 모달 (SPEC-102) */}
+      {deletingBookmark && (
+        <div
+          className="chat-modal-overlay modal-overlay"
+          data-testid="bookmark-delete-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeletingBookmark) handleCancelDeleteBookmark();
+          }}
+          role="presentation"
+        >
+          <div
+            className="delete-confirm-modal bookmark-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bookmark-delete-confirm-title"
+          >
+            <h3 id="bookmark-delete-confirm-title" className="delete-confirm-title">
+              보관 항목 삭제
+            </h3>
+            <p className="delete-confirm-message">
+              {(() => {
+                const raw = deletingBookmark.title || deletingBookmark.content || '선택한 보관 항목';
+                return raw.length > 100 ? `${raw.slice(0, 100)}...` : raw;
+              })()}
+            </p>
+            <p className="delete-confirm-warning">
+              이 보관 항목을 삭제하시겠습니까? 삭제 후에는 복구할 수 없습니다.
+            </p>
+            <div className="delete-confirm-actions">
+              <button
+                type="button"
+                className="btn-cancel-delete"
+                onClick={handleCancelDeleteBookmark}
+                disabled={isDeletingBookmark}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn-confirm-delete"
+                onClick={handleConfirmDeleteBookmark}
+                disabled={isDeletingBookmark}
+              >
+                {isDeletingBookmark ? '삭제 중...' : '삭제'}
               </button>
             </div>
           </div>
