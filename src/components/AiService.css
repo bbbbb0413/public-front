@@ -1833,6 +1833,11 @@
   background: rgba(99, 102, 241, 0.35);
 }
 
+.btn-new-chat:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .session-loading,
 .session-empty {
   padding: 16px 14px;
@@ -1863,6 +1868,15 @@
 
 .session-item:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.session-item.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.session-item.disabled:hover {
+  background: transparent;
 }
 
 .session-item.active {
@@ -1950,6 +1964,12 @@
 
 .btn-delete-session:hover {
   color: #f87171;
+}
+
+.btn-delete-session:disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.3;
 }
 
 .btn-bookmark-answer {
