@@ -12260,4 +12260,436 @@ describe('AiService Component', () => {
       }
     });
   });
+
+  describe('SPEC-103: 답변 생성 스트리밍 중 새 대화 시작 및 세션 전환 시 이전 작업 취소 연동과 안전장치', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'spec103-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    const mockSessions: aiApi.SessionOut[] = [
+      {
+        sessionId: 'sess-103-a',
+        title: '첫 번째 세션',
+        updatedAt: '2026-11-16T00:00:00Z',
+        isBookmarked: false,
+      },
+      {
+        sessionId: 'sess-103-b',
+        title: '두 번째 세션',
+        updatedAt: '2026-11-16T00:01:00Z',
+        isBookmarked: false,
+      },
+    ];
+
+    const mockBookmarks: aiApi.BookmarkItem[] = [
+      {
+        id: 'bm-103-1',
+        sessionId: 'sess-103-a',
+        turnIndex: 1,
+        title: '북마크 1',
+        content: '북마크된 답변',
+        createdAt: '2026-11-16T00:00:00Z',
+      },
+    ];
+
+    beforeEach(() => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue(mockSessions);
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue(mockBookmarks);
+    });
+
+    it('Given 스트리밍 진행 중일 때 When 새 대화 시작(handleNewChat)이 트리거되면 Then 활성 스트림이 취소되고 isStreaming이 false로 초기화되며 지연 수신된 이벤트가 새 화면을 오염시키지 않는다', async () => {
+      let capturedOnMessage: ((token: string) => void) | undefined;
+      let capturedOnDone: ((meta?: aiApi.AskDoneMeta) => void) | undefined;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, onDone) => {
+        capturedOnMessage = onMessage;
+        capturedOnDone = onDone;
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 채팅 열기
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 질문 전송
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '스트리밍 중 새 대화 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 토큰 1회 전달 -> 스트리밍 중
+      await act(async () => {
+        capturedOnMessage?.('스트리밍 첫 번째 청크 ');
+      });
+
+      expect(screen.getAllByText(/스트리밍 첫 번째 청크/).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: '중단' })).toBeInTheDocument();
+
+      // 사이드바의 새 대화 시작 버튼 확인
+      const newChatBtn = screen.getByRole('button', { name: /새 대화 시작/i });
+      expect(newChatBtn).toBeInTheDocument();
+
+      // 스트리밍 중 handleNewChat 직접 호출 트리거
+      const reactPropsKey = Object.keys(newChatBtn).find((key) => key.startsWith('__reactProps$'));
+      const props = reactPropsKey ? (newChatBtn as unknown as Record<string, { onClick?: (e?: unknown) => void }>)[reactPropsKey] : null;
+      await act(async () => {
+        props?.onClick?.({ preventDefault: () => {}, stopPropagation: () => {} });
+      });
+
+      // 검증: cancelMock 호출되고, isStreaming이 false로 전환(중단 버튼 사라짐)
+      expect(cancelMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: '중단' })).not.toBeInTheDocument();
+      // 새 대화창이므로 이전 질문 및 답변 텍스트가 화면에서 비워져야 함
+      expect(screen.queryByText('스트리밍 첫 번째 청크')).not.toBeInTheDocument();
+
+      // 지연 도착한 이전 스트림의 onMessage 및 onDone 콜백 호출
+      await act(async () => {
+        capturedOnMessage?.('오염 토큰');
+        capturedOnDone?.({ confidence: 0.9 });
+      });
+
+      // 화면에 오염 토큰이 노출되지 않고 chat-message 버블이 추가되지 않아야 함
+      expect(screen.queryByText(/오염 토큰/)).not.toBeInTheDocument();
+      expect(document.querySelectorAll('.chat-message')).toHaveLength(0);
+    });
+
+    it('Given 스트리밍 진행 중일 때 When handleLoadSession으로 다른 세션을 불러오면 Then 이전 스트림이 먼저 취소되고 새 세션 내용만 반영된다', async () => {
+      let capturedOnMessage: ((token: string) => void) | undefined;
+      let capturedOnDone: ((meta?: aiApi.AskDoneMeta) => void) | undefined;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, onMessage, onDone) => {
+        capturedOnMessage = onMessage;
+        capturedOnDone = onDone;
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      const sessionDetailB: aiApi.SessionDetailOut = {
+        sessionId: 'sess-103-b',
+        title: '두 번째 세션',
+        createdAt: '2026-11-16T00:01:00Z',
+        updatedAt: '2026-11-16T00:01:00Z',
+        turns: [
+          { role: 'user', content: '세션 B의 질문', createdAt: '2026-11-16T00:01:00Z' },
+          { role: 'assistant', content: '세션 B의 고유 답변', createdAt: '2026-11-16T00:01:01Z' },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailB);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 질문 전송 및 스트리밍 시작
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '진행 중 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      await act(async () => {
+        capturedOnMessage?.('생성 중이던 이전 텍스트');
+      });
+
+      expect(screen.getByRole('button', { name: '중단' })).toBeInTheDocument();
+
+      // 사이드바 목록의 두 번째 세션 아이템을 직접 handleLoadSession 방식으로 트리거 (또는 클릭)
+      // 요구사항: handleLoadSession 실행 시 활성 스트림 취소 핸들러가 존재하면 먼저 호출
+      // 테스트에서는 handleLoadSession 내부 로직을 검증하기 위해 세션 클릭 혹은 이벤트 트리거
+      // UI에서는 isStreaming 중 클릭을 막지만, 직접 호출되거나 프로그래밍 방식으로 실행되었을 때도 방어되어야 함.
+      // 여기서는 아이템을 찾아서 클릭해봄
+      const sessionBItem = screen.getByText('두 번째 세션').closest('li');
+      expect(sessionBItem).not.toBeNull();
+
+      // UI 상에서는 disabled 가드가 있으므로 클릭 시 세션 로드가 차단됨
+      await act(async () => {
+        fireEvent.click(sessionBItem!);
+      });
+      expect(aiApi.getSessionDetail).not.toHaveBeenCalled();
+
+      // handleLoadSession이 직접 실행되었을 때(예: 프로그래밍 호출) 취소 연동 검증
+      const testHandleLoadSession = (window as unknown as { __testHandleLoadSession?: (sid: string) => Promise<void> }).__testHandleLoadSession;
+      expect(testHandleLoadSession).toBeDefined();
+
+      await act(async () => {
+        await testHandleLoadSession?.('sess-103-b');
+      });
+
+      // 검증: 세션 로드 시 이전 스트림 cancel이 먼저 호출되고 isStreaming 해제
+      expect(cancelMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: '중단' })).not.toBeInTheDocument();
+      expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-103-b');
+
+      // 로드된 세션 B의 답변이 화면에 표시됨
+      expect(screen.getAllByText('세션 B의 고유 답변').length).toBeGreaterThan(0);
+
+      // 이전 스트림의 지연 토큰 도착 시 세션 B의 로그에 오염되지 않음
+      await act(async () => {
+        capturedOnMessage?.('오염시키려는 이전 스트림 토큰');
+        capturedOnDone?.({ confidence: 0.95 });
+      });
+      expect(screen.queryByText(/오염시키려는 이전 스트림 토큰/)).not.toBeInTheDocument();
+    });
+
+    it('Given 스트리밍 진행 중(isStreaming === true)일 때 When 사이드바를 확인하면 Then 새 대화 및 삭제 버튼이 disabled이고 세션/북마크 아이템에 disabled 클래스가 적용되며 클릭 시 세션 로드가 차단된다', async () => {
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: vi.fn().mockResolvedValue(undefined) } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 스트리밍 시작
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '안전장치 검증 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 1. 새 대화 시작 버튼 disabled 확인
+      const newChatBtn = screen.getByRole('button', { name: /새 대화 시작/i });
+      expect(newChatBtn).toBeDisabled();
+
+      // 2. 세션 목록 아이템 disabled 클래스 확인
+      const sessionItem = screen.getByText('첫 번째 세션').closest('li');
+      expect(sessionItem).toHaveClass('disabled');
+
+      // 3. 세션 삭제 버튼 disabled 확인
+      const deleteSessionBtns = screen.getAllByRole('button', { name: /삭제/i });
+      deleteSessionBtns.forEach((btn) => {
+        if (btn.classList.contains('btn-delete-session')) {
+          expect(btn).toBeDisabled();
+        }
+      });
+
+      // 4. 세션 아이템 클릭 시 getSessionDetail 호출되지 않음
+      await act(async () => {
+        fireEvent.click(sessionItem!);
+      });
+      expect(aiApi.getSessionDetail).not.toHaveBeenCalled();
+
+      // 5. 보관함 탭으로 전환하여 북마크 아이템 확인
+      const bookmarkTab = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTab);
+      });
+
+      const bookmarkItem = screen.getByText('북마크 1').closest('li');
+      expect(bookmarkItem).toHaveClass('disabled');
+      expect(bookmarkItem).toHaveClass('bookmark-item');
+
+      // 북마크 아이템 클릭 시에도 세션 로드 차단
+      await act(async () => {
+        fireEvent.click(bookmarkItem!);
+      });
+      expect(aiApi.getSessionDetail).not.toHaveBeenCalled();
+    });
+
+    it('Given 스트리밍이 아닌 일반 상태(isStreaming === false)일 때 Then 새 대화 및 삭제 버튼이 활성화되고 세션 아이템 클릭 시 정상 로드된다', async () => {
+      const sessionDetailA: aiApi.SessionDetailOut = {
+        sessionId: 'sess-103-a',
+        title: '첫 번째 세션',
+        createdAt: '2026-11-16T00:00:00Z',
+        updatedAt: '2026-11-16T00:00:00Z',
+        turns: [
+          { role: 'user', content: '과거 질문', createdAt: '2026-11-16T00:00:00Z' },
+          { role: 'assistant', content: '과거 답변', createdAt: '2026-11-16T00:00:01Z' },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailA);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      // 스트리밍이 없는 상태
+      const newChatBtn = screen.getByRole('button', { name: /새 대화 시작/i });
+      expect(newChatBtn).not.toBeDisabled();
+
+      const sessionItem = screen.getByText('첫 번째 세션').closest('li');
+      expect(sessionItem).not.toHaveClass('disabled');
+
+      const deleteSessionBtns = screen.getAllByRole('button', { name: /삭제/i });
+      deleteSessionBtns.forEach((btn) => {
+        if (btn.classList.contains('btn-delete-session')) {
+          expect(btn).not.toBeDisabled();
+        }
+      });
+
+      // 클릭 시 정상적으로 getSessionDetail 호출
+      await act(async () => {
+        fireEvent.click(sessionItem!);
+      });
+      expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-103-a');
+      expect(screen.getAllByText('과거 답변').length).toBeGreaterThan(0);
+    });
+
+    it('QA: Given 스트리밍 진행 중 새 대화로 전환되었을 때 When 이전 스트림의 지연 콜백(onError, onSources, onProgress, onSessionId, onDone)이 도착해도 Then 에러나 세션 정보 오염 없이 안전하게 무시되고 fetchSessions도 추가 호출되지 않는다', async () => {
+      let capturedOnError: ((error?: unknown) => void) | undefined;
+      let capturedOnSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+      let capturedOnSessionId: ((newId: string) => void) | undefined;
+      let capturedOnProgress: ((progress: aiApi.AgentProgress) => void) | undefined;
+      let capturedOnDone: ((meta?: aiApi.AskDoneMeta) => void) | undefined;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((_q, _onMessage, onDone, onError, _userId, _prevChatLog, onSources, _sessionId, onSessionId, onProgress) => {
+        capturedOnDone = onDone;
+        capturedOnError = onError;
+        capturedOnSources = onSources;
+        capturedOnSessionId = onSessionId;
+        capturedOnProgress = onProgress;
+        return { cancel: cancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '경계 테스트 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      const initialGetSessionsCalls = vi.mocked(aiApi.getSessions).mock.calls.length;
+
+      // 새 대화 시작(handleNewChat) 트리거
+      const newChatBtn = screen.getByRole('button', { name: /새 대화 시작/i });
+      const reactPropsKey = Object.keys(newChatBtn).find((key) => key.startsWith('__reactProps$'));
+      const props = reactPropsKey ? (newChatBtn as unknown as Record<string, { onClick?: (e?: unknown) => void }>)[reactPropsKey] : null;
+      await act(async () => {
+        props?.onClick?.({ preventDefault: () => {}, stopPropagation: () => {} });
+      });
+
+      expect(cancelMock).toHaveBeenCalledTimes(1);
+
+      // 이전 스트림의 지연 콜백들을 차례로 호출
+      await act(async () => {
+        capturedOnSources?.([{ fileName: '옛날문서.txt', chunkIndex: 1, documentId: 'doc-old', score: 0.9, snippet: '옛날 내용' }]);
+        capturedOnSessionId?.('sess-should-not-set');
+        capturedOnProgress?.({ phase: 'generating', iteration: 1 });
+        capturedOnError?.(new Error('지연된 에러 발생'));
+        capturedOnDone?.({ confidence: 0.88 });
+      });
+
+      // 검증: 에러 메시지가 화면에 노출되지 않음
+      expect(screen.queryByText(/지연된 에러 발생/)).not.toBeInTheDocument();
+      // 검증: 이전 스트림 완료로 인해 fetchSessions가 추가로 호출되지 않음
+      expect(vi.mocked(aiApi.getSessions).mock.calls.length).toBe(initialGetSessionsCalls);
+      // 검증: 화면에 메시지가 전혀 남지 않음
+      expect(document.querySelectorAll('.chat-message')).toHaveLength(0);
+    });
+
+    it('QA: Given 스트리밍 취소 핸들러(cancel) 호출 시 네트워크 에러로 reject가 발생하더라도 When 새 대화 시작 또는 세션 로드가 실행되면 Then 에러가 전파되지 않고 정상적으로 대화창 초기화 및 세션 로드가 완료된다', async () => {
+      const rejectCancelMock = vi.fn().mockRejectedValue(new Error('네트워크 타임아웃으로 취소 실패'));
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce(() => {
+        return { cancel: rejectCancelMock } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      const sessionDetailA: aiApi.SessionDetailOut = {
+        sessionId: 'sess-103-a',
+        title: '첫 번째 세션',
+        createdAt: '2026-11-16T00:00:00Z',
+        updatedAt: '2026-11-16T00:00:00Z',
+        turns: [
+          { role: 'user', content: '예외 복원 질문', createdAt: '2026-11-16T00:00:00Z' },
+          { role: 'assistant', content: '예외 복원 답변', createdAt: '2026-11-16T00:00:01Z' },
+        ],
+      };
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(sessionDetailA);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      const chatOpenBtn = screen.getByRole('button', { name: /채팅 열기/i });
+      await act(async () => {
+        fireEvent.click(chatOpenBtn);
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      const sendBtn = screen.getByRole('button', { name: /전송/i });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '취소 실패 테스트' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // handleLoadSession 직접 실행 (취소 실패하더라도 안전하게 세션 로드 진행)
+      const testHandleLoadSession = (window as unknown as { __testHandleLoadSession?: (sid: string) => Promise<void> }).__testHandleLoadSession;
+      await act(async () => {
+        await testHandleLoadSession?.('sess-103-a');
+      });
+
+      expect(rejectCancelMock).toHaveBeenCalledTimes(1);
+      expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-103-a');
+      expect(screen.getAllByText('예외 복원 답변').length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: '중단' })).not.toBeInTheDocument();
+    });
+  });
 });

@@ -234,6 +234,7 @@ export const AiService = () => {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const activeSubscriptionsRef = useRef<Set<() => void>>(new Set());
   const activeStreamCancelRef = useRef<(() => Promise<void>) | null>(null);
+  const currentStreamingIdRef = useRef<number>(0);
   const streamingAnswerRef = useRef<string>('');
   const lastFailedQuestionRef = useRef<string>('');
   const lastCancelledQuestionRef = useRef<string>('');
@@ -437,6 +438,12 @@ export const AiService = () => {
   };
 
   const handleNewChat = () => {
+    currentStreamingIdRef.current += 1;
+    if (activeStreamCancelRef.current) {
+      void activeStreamCancelRef.current();
+      activeStreamCancelRef.current = null;
+    }
+    setIsStreaming(false);
     setSessionId(null);
     setChatLog([]);
     setStreamingAnswer('');
@@ -499,6 +506,12 @@ export const AiService = () => {
   };
 
   const handleLoadSession = async (sid: string, targetTurnIndex?: number | null) => {
+    currentStreamingIdRef.current += 1;
+    if (activeStreamCancelRef.current) {
+      void activeStreamCancelRef.current();
+      activeStreamCancelRef.current = null;
+    }
+    setIsStreaming(false);
     try {
       const detail = await getSessionDetail(sid);
       if (!detail) return;
@@ -549,6 +562,17 @@ export const AiService = () => {
       setErrorMsg('세션을 불러오는 데 실패했습니다.');
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __testHandleLoadSession?: typeof handleLoadSession }).__testHandleLoadSession = handleLoadSession;
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as unknown as { __testHandleLoadSession?: unknown }).__testHandleLoadSession;
+      }
+    };
+  });
 
   const handleDeleteSessionClick = (session: SessionOut, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -866,6 +890,7 @@ export const AiService = () => {
   };
 
   const handleCancelStreaming = async () => {
+    currentStreamingIdRef.current += 1;
     const canceledText = streamingAnswerRef.current || streamingAnswer;
     if (activeStreamCancelRef.current) {
       await activeStreamCancelRef.current();
@@ -888,6 +913,8 @@ export const AiService = () => {
   };
 
   const startQuestionStreaming = (currentQuestion: string, prevChatLog: ChatMessage[]) => {
+    currentStreamingIdRef.current += 1;
+    const streamId = currentStreamingIdRef.current;
     setErrorMsg('');
     lastCancelledQuestionRef.current = currentQuestion;
     setIsStreaming(true);
@@ -922,11 +949,13 @@ export const AiService = () => {
     const handle = askQuestionStream(
       currentQuestion,
       (token) => {
+        if (currentStreamingIdRef.current !== streamId) return;
         accumulated += token;
         streamingAnswerRef.current = accumulated;
         setStreamingAnswer(accumulated);
       },
       (finalMeta) => {
+        if (currentStreamingIdRef.current !== streamId) return;
         activeStreamCancelRef.current = null;
         const confidence = finalMeta?.confidence !== undefined ? finalMeta.confidence : lastProgress?.confidence;
         const missing = finalMeta?.missing !== undefined ? finalMeta.missing : lastProgress?.missing;
@@ -951,6 +980,7 @@ export const AiService = () => {
         if (userId) fetchSessions();
       },
       (error?: unknown) => {
+        if (currentStreamingIdRef.current !== streamId) return;
         activeStreamCancelRef.current = null;
         const errorDetails = getErrorMessage(error);
         setErrorMsg(errorDetails);
@@ -973,12 +1003,17 @@ export const AiService = () => {
       userId,
       prevChatLog,
       (sources) => {
+        if (currentStreamingIdRef.current !== streamId) return;
         receivedSources = sources;
         setCurrentSources(sources);
       },
       sessionId,
-      (newId) => setSessionId(newId),
+      (newId) => {
+        if (currentStreamingIdRef.current !== streamId) return;
+        setSessionId(newId);
+      },
       (progress) => {
+        if (currentStreamingIdRef.current !== streamId) return;
         lastProgress = progress;
         setCurrentProgress(progress);
       },
@@ -1413,7 +1448,9 @@ export const AiService = () => {
                   <button
                     className="btn-new-chat"
                     onClick={handleNewChat}
+                    disabled={isStreaming}
                     title="새 대화 시작"
+                    aria-label="새 대화 시작"
                   >
                     +
                   </button>
@@ -1467,8 +1504,11 @@ export const AiService = () => {
                       {sessions.map((s) => (
                         <li
                           key={s.sessionId}
-                          className={`session-item${sessionId === s.sessionId ? ' active' : ''}`}
-                          onClick={() => handleLoadSession(s.sessionId)}
+                          className={`session-item${sessionId === s.sessionId ? ' active' : ''}${isStreaming ? ' disabled' : ''}`}
+                          onClick={() => {
+                            if (isStreaming) return;
+                            handleLoadSession(s.sessionId);
+                          }}
                         >
                           <div className="session-item-content">
                             <span className="session-item-title">{s.title}</span>
@@ -1487,6 +1527,7 @@ export const AiService = () => {
                             </button>
                             <button
                               className="btn-delete-session"
+                              disabled={isStreaming}
                               onClick={(e) => handleDeleteSessionClick(s, e)}
                               aria-label={s.title ? `${s.title} 삭제` : '세션 삭제'}
                               title="삭제"
@@ -1510,8 +1551,11 @@ export const AiService = () => {
                       {bookmarks.map((b) => (
                         <li
                           key={b.id}
-                          className={`session-item bookmark-item${sessionId === b.sessionId ? ' active' : ''}`}
-                          onClick={() => handleLoadSession(b.sessionId, b.turnIndex)}
+                          className={`session-item bookmark-item${sessionId === b.sessionId ? ' active' : ''}${isStreaming ? ' disabled' : ''}`}
+                          onClick={() => {
+                            if (isStreaming) return;
+                            handleLoadSession(b.sessionId, b.turnIndex);
+                          }}
                         >
                           <div className="session-item-content">
                             <span
@@ -1534,6 +1578,7 @@ export const AiService = () => {
                           <div className="session-item-actions">
                             <button
                               className="btn-delete-session"
+                              disabled={isStreaming}
                               onClick={(e) => handleDeleteBookmarkClick(b, e)}
                               aria-label="보관 항목 삭제"
                               title="보관 삭제"
