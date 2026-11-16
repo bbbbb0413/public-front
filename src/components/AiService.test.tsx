@@ -12937,6 +12937,139 @@ describe('AiService Component', () => {
           expect(input.value).toBe('기존 입력 내용');
         }
       });
+
+      it('QA 1: Given 스트리밍 실시간 응답 완료 시 missing에 시스템 상태 사유가 주입되어 내려오더라도 Then 화면에 missing-info 영역 및 [추가 확인 필요] 배지가 노출되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+          setTimeout(() => {
+            onSources?.([{ documentId: 'doc-qa', fileName: 'guide.pdf', score: 0.9, snippet: '내용', chunkIndex: 0 }]);
+            onMessage('에이전틱 답변 결과입니다.');
+            onDone?.({
+              confidence: 0.85,
+              missing: ['답변 검증 예산 소진으로 상세 비평 생략', '비평 파싱 실패'],
+            });
+          }, 10);
+          return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '에이전틱 질문' } });
+          fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        expect(screen.getAllByText('에이전틱 답변 결과입니다.').length).toBeGreaterThan(0);
+        expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+        expect(screen.queryByText(/확인하지 못한 항목/)).not.toBeInTheDocument();
+        expect(screen.queryByText('답변 검증 예산 소진으로 상세 비평 생략')).not.toBeInTheDocument();
+        expect(screen.queryByText('비평 파싱 실패')).not.toBeInTheDocument();
+      });
+
+      it('QA 2: Given 근거 문서 미발견 답변에 레거시 시스템 상태 문구가 포함된 missing이 전달되어도 Then ungrounded-warning 배너만 노출되고 missing-info는 차단된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+          setTimeout(() => {
+            onSources?.([]);
+            onMessage('근거가 없는 답변입니다.');
+            onDone?.({
+              confidence: 0.0,
+              missing: ['관련 지식베이스 문서를 찾지 못함'],
+            });
+          }, 10);
+          return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '근거 없는 질문' } });
+          fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        expect(screen.getByTestId('ungrounded-warning')).toBeInTheDocument();
+        expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+        expect(screen.queryByText('관련 지식베이스 문서를 찾지 못함')).not.toBeInTheDocument();
+      });
+
+      it('QA 3: Given handleAskMissingItem에 시스템 상태 메시지의 서브스트링이나 변형이 전달되었을 때 Then 질문 입력창 갱신이 안전하게 차단된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '기존 작성 중인 텍스트' } });
+        });
+
+        const testHandleAskMissingItem = (window as unknown as { __testHandleAskMissingItem?: (item: string) => void }).__testHandleAskMissingItem;
+
+        if (testHandleAskMissingItem) {
+          await act(async () => {
+            testHandleAskMissingItem('  관련 지식베이스 문서를 찾지 못함  ');
+            testHandleAskMissingItem('비평 응답 분석 실패: 상세 파싱 오류 발생');
+            testHandleAskMissingItem('[오류] 답변 검증 예산 소진으로 상세 비평 생략됨');
+          });
+          expect(input.value).toBe('기존 작성 중인 텍스트');
+        }
+      });
+
+      it('QA 4: Given getSanitizedMissing에 비정상적인 타입의 배열 원소가 전달되어도 Then 런타임 오류 없이 안전하게 정제된다', () => {
+        const corruptInput = [
+          null,
+          undefined,
+          123,
+          {},
+          [],
+          '정상 누락 항목',
+          '비평 파싱 실패',
+        ] as unknown as string[];
+
+        const sanitized = getSanitizedMissing(corruptInput);
+        expect(sanitized).toEqual(['정상 누락 항목']);
+      });
     });
   });
 });
