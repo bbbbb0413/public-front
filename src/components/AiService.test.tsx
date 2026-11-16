@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
-import { AiService } from './AiService';
+import { AiService, getSanitizedMissing, SYSTEM_STATUS_PATTERNS } from './AiService';
 import { AuthContext } from '../context/AuthContext';
 import * as aiApi from '../api/ai';
 
@@ -12690,6 +12690,253 @@ describe('AiService Component', () => {
       expect(aiApi.getSessionDetail).toHaveBeenCalledWith('sess-103-a');
       expect(screen.getAllByText('예외 복원 답변').length).toBeGreaterThan(0);
       expect(screen.queryByRole('button', { name: '중단' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('SPEC-104: RAG 답변 확인하지 못한 항목(missing)의 시스템 상태 오염 분리 및 왜곡된 후속 질문 방지', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'spec104-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      updateUser: vi.fn(),
+    };
+
+    describe('getSanitizedMissing 헬퍼 함수', () => {
+      it('정의된 시스템 상태 패턴을 모두 포함하고 있어야 한다', () => {
+        expect(SYSTEM_STATUS_PATTERNS).toContain('관련 지식베이스 문서를 찾지 못함');
+        expect(SYSTEM_STATUS_PATTERNS).toContain('비평 파싱 실패');
+        expect(SYSTEM_STATUS_PATTERNS).toContain('비평 응답 분석 실패');
+        expect(SYSTEM_STATUS_PATTERNS).toContain('답변 검증 예산 소진으로 상세 비평 생략');
+      });
+
+      it('시스템 상태 메시지 패턴을 포함하는 문자열을 제외하고 순수 질문 누락 항목만 반환한다', () => {
+        const raw = [
+          '관련 지식베이스 문서를 찾지 못함',
+          '비평 파싱 실패',
+          '비평 응답 분석 실패',
+          '답변 검증 예산 소진으로 상세 비평 생략',
+          '환불 정책 세부 규정',
+          'VIP 멤버십 혜택',
+        ];
+        const sanitized = getSanitizedMissing(raw);
+        expect(sanitized).toEqual(['환불 정책 세부 규정', 'VIP 멤버십 혜택']);
+      });
+
+      it('undefined나 빈 배열이 전달되면 빈 배열을 반환한다', () => {
+        expect(getSanitizedMissing(undefined)).toEqual([]);
+        expect(getSanitizedMissing([])).toEqual([]);
+      });
+
+      it('공백 문자열이나 시스템 상태 패턴이 부분 포함된 문자열도 정제한다', () => {
+        const raw = [
+          '   ',
+          '비평 파싱 실패: 세부 오류 원인',
+          '정상적인 누락 주제',
+        ];
+        expect(getSanitizedMissing(raw)).toEqual(['정상적인 누락 주제']);
+      });
+    });
+
+    describe('화면 렌더링 및 질문 연계 방어', () => {
+      it('Given 근거 문서 미발견 상태(isUngrounded === true)일 때 Then 상단 ungrounded-warning 배너만 표시되고 missing-info 영역 및 [추가 확인 필요] 배지는 렌더링되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+          setTimeout(() => {
+            onSources?.([]);
+            onMessage('근거 문서를 찾지 못해 일반 지식으로 답합니다.');
+            onDone?.({ confidence: 0, missing: [] });
+          }, 10);
+          return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '문서 없는 질문' } });
+          fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        expect(screen.getByTestId('ungrounded-warning')).toBeInTheDocument();
+        expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+        expect(screen.queryByText(/확인하지 못한 항목/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/추가 확인 필요/)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /질문하기/i })).not.toBeInTheDocument();
+      });
+
+      it('Given 세션 복원 시 missing에 시스템 상태 메시지가 포함되어 있을 때 Then 프론트엔드 필터링을 통해 missing-info 영역에 노출되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          {
+            sessionId: 'sess-spec-104-legacy',
+            title: '레거시 세션',
+            updatedAt: '2026-11-17T00:00:00Z',
+          },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+          sessionId: 'sess-spec-104-legacy',
+          title: '레거시 세션',
+          createdAt: '2026-11-17T00:00:00Z',
+          updatedAt: '2026-11-17T00:00:00Z',
+          turns: [
+            { role: 'user', content: '과거 질문', createdAt: '2026-11-17T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '과거 답변',
+              confidence: 0.7,
+              sources: [{ documentId: 'doc-1', fileName: 'guide.pdf', score: 0.8, snippet: '내용', chunkIndex: 0 }],
+              missing: ['관련 지식베이스 문서를 찾지 못함', '비평 파싱 실패', '답변 검증 예산 소진으로 상세 비평 생략'],
+              createdAt: '2026-11-17T00:00:01Z',
+            },
+          ],
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const testHandleLoadSession = (window as unknown as { __testHandleLoadSession?: (sid: string) => Promise<void> }).__testHandleLoadSession;
+        await act(async () => {
+          await testHandleLoadSession?.('sess-spec-104-legacy');
+        });
+
+        expect(screen.getAllByText('과거 답변').length).toBeGreaterThan(0);
+        expect(screen.queryByTestId('missing-info')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+        expect(screen.queryByText('관련 지식베이스 문서를 찾지 못함')).not.toBeInTheDocument();
+        expect(screen.queryByText('비평 파싱 실패')).not.toBeInTheDocument();
+      });
+
+      it('Given 세션 복원 시 missing에 유효한 누락 항목과 시스템 상태 메시지가 혼재되어 있을 때 Then 유효한 누락 항목만 렌더링되고 [질문하기] 클릭 시 입력창에 올바른 템플릿이 채워진다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+          sessionId: 'sess-spec-104-mixed',
+          title: '혼재 세션',
+          createdAt: '2026-11-17T00:00:00Z',
+          updatedAt: '2026-11-17T00:00:00Z',
+          turns: [
+            { role: 'user', content: '환불 규정이 어떻게 되나요?', createdAt: '2026-11-17T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '환불에 대한 일반 안내입니다.',
+              confidence: 0.75,
+              sources: [{ documentId: 'doc-1', fileName: 'terms.pdf', score: 0.85, snippet: '약관 내용', chunkIndex: 0 }],
+              missing: ['제품 환불 규정', '비평 파싱 실패'],
+              createdAt: '2026-11-17T00:00:01Z',
+            },
+          ],
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const testHandleLoadSession = (window as unknown as { __testHandleLoadSession?: (sid: string) => Promise<void> }).__testHandleLoadSession;
+        await act(async () => {
+          await testHandleLoadSession?.('sess-spec-104-mixed');
+        });
+
+        expect(screen.getByTestId('missing-info')).toBeInTheDocument();
+        expect(screen.getByTestId('missing-warning-badge')).toBeInTheDocument();
+        expect(screen.getByText('제품 환불 규정')).toBeInTheDocument();
+        expect(screen.queryByText('비평 파싱 실패')).not.toBeInTheDocument();
+
+        const askBtn = screen.getByRole('button', { name: '제품 환불 규정에 대해 질문하기' });
+        expect(askBtn).toBeInTheDocument();
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+        await act(async () => {
+          fireEvent.click(askBtn);
+        });
+
+        expect(input.value).toBe('"제품 환불 규정"에 대해 자세히 설명해 줘');
+      });
+
+      it('Given 확인하지 못한 항목 텍스트가 빈 문자열이거나 공백, 또는 시스템 상태 메시지인 경우 When [질문하기]가 호출되어도 질문 입력창이 갱신되지 않고 기존 입력 상태를 보존한다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+          sessionId: 'sess-spec-104-fallback',
+          title: '방어 세션',
+          createdAt: '2026-11-17T00:00:00Z',
+          updatedAt: '2026-11-17T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문', createdAt: '2026-11-17T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '답변',
+              confidence: 0.8,
+              sources: [{ documentId: 'doc-1', fileName: 'doc.pdf', score: 0.9, snippet: '내용', chunkIndex: 0 }],
+              missing: ['유효 항목'],
+              createdAt: '2026-11-17T00:00:01Z',
+            },
+          ],
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuthContextValue}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+
+        const testHandleLoadSession = (window as unknown as { __testHandleLoadSession?: (sid: string) => Promise<void> }).__testHandleLoadSession;
+        await act(async () => {
+          await testHandleLoadSession?.('sess-spec-104-fallback');
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '기존 입력 내용' } });
+        });
+
+        const testHandleAskMissingItem = (window as unknown as { __testHandleAskMissingItem?: (item: string) => void }).__testHandleAskMissingItem;
+
+        if (testHandleAskMissingItem) {
+          await act(async () => {
+            testHandleAskMissingItem('');
+            testHandleAskMissingItem('   ');
+            testHandleAskMissingItem('관련 지식베이스 문서를 찾지 못함');
+            testHandleAskMissingItem('비평 파싱 실패');
+            testHandleAskMissingItem('비평 응답 분석 실패');
+            testHandleAskMissingItem('답변 검증 예산 소진으로 상세 비평 생략');
+          });
+          expect(input.value).toBe('기존 입력 내용');
+        }
+      });
     });
   });
 });
