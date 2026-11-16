@@ -98,6 +98,25 @@ const PHASE_LABELS: Record<AgentPhase, string> = {
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
 
+// eslint-disable-next-line react-refresh/only-export-components
+export const SYSTEM_STATUS_PATTERNS = [
+  '관련 지식베이스 문서를 찾지 못함',
+  '비평 파싱 실패',
+  '비평 응답 분석 실패',
+  '답변 검증 예산 소진으로 상세 비평 생략',
+];
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const getSanitizedMissing = (missing?: string[]): string[] => {
+  if (!missing || !Array.isArray(missing)) return [];
+  return missing.filter((item) => {
+    if (typeof item !== 'string') return false;
+    const trimmed = item.trim();
+    if (!trimmed) return false;
+    return !SYSTEM_STATUS_PATTERNS.some((pattern) => trimmed.includes(pattern));
+  });
+};
+
 const getErrorMessage = (error: unknown, fallback = '답변 수신 도중 에러가 발생했습니다.'): string => {
   if (!error) return fallback;
 
@@ -1105,9 +1124,27 @@ export const AiService = () => {
   };
 
   const handleAskMissingItem = (itemText: string) => {
-    setQuestion(`"${itemText.trim()}"에 대해 자세히 설명해 줘`);
+    if (!itemText || !itemText.trim()) {
+      return;
+    }
+    const trimmed = itemText.trim();
+    if (SYSTEM_STATUS_PATTERNS.some((pattern) => trimmed.includes(pattern))) {
+      return;
+    }
+    setQuestion(`"${trimmed}"에 대해 자세히 설명해 줘`);
     chatInputRef.current?.focus();
   };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __testHandleAskMissingItem?: typeof handleAskMissingItem }).__testHandleAskMissingItem = handleAskMissingItem;
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as unknown as { __testHandleAskMissingItem?: unknown }).__testHandleAskMissingItem;
+      }
+    };
+  });
 
   const lastAiMsg = chatLog.filter((m) => m.sender === 'ai').at(-1);
 
@@ -1622,12 +1659,14 @@ export const AiService = () => {
                   const isUngrounded =
                     isAi &&
                     isNoSources &&
-                    (msg.confidence === 0 || (msg.missing && msg.missing.length > 0));
+                    (msg.confidence === 0 || !msg.confidence);
                   const isLowConfidence =
                     isAi &&
                     msg.confidence !== undefined &&
                     msg.confidence < 0.6 &&
                     !isUngrounded;
+                  const displayMissing = getSanitizedMissing(msg.missing);
+                  const hasMissing = isAi && !isUngrounded && displayMissing.length > 0;
 
                   return (
                     <div
@@ -1636,10 +1675,10 @@ export const AiService = () => {
                       data-turn-index={turnIndex}
                     >
                       <div
-                        className={`message-bubble${isAi && msg.missing && msg.missing.length > 0 ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
+                        className={`message-bubble${hasMissing ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
                         data-turn-index={turnIndex}
                       >
-                        {isAi && msg.missing && msg.missing.length > 0 && (
+                        {hasMissing && (
                           <div className="missing-warning-badge" data-testid="missing-warning-badge">
                             추가 확인 필요
                           </div>
@@ -1882,11 +1921,11 @@ export const AiService = () => {
                               })()}
                             </div>
                           )}
-                          {msg.missing && msg.missing.length > 0 && (
+                          {!isUngrounded && displayMissing.length > 0 && (
                             <div className="missing-info" data-testid="missing-info">
                               <span className="missing-label">확인하지 못한 항목:</span>
                               <ul className="missing-list">
-                                {msg.missing.map((item, mIdx) => (
+                                {displayMissing.map((item, mIdx) => (
                                   <li key={mIdx} className="missing-item">
                                     <span className="missing-item-text">{item}</span>
                                     <button
