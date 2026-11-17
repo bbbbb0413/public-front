@@ -13072,4 +13072,580 @@ describe('AiService Component', () => {
       });
     });
   });
+
+  describe('SPEC-105: 세션 상세 조회 시 북마크 상태 전달 및 상단 헤더 보관 연동', () => {
+    const mockAuthContextValue = {
+      user: { uuid: 'test-user-id', nickName: 'Tester' },
+      token: 'jwt-token',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    it('Given 북마크된 세션을 로드했을 때 When 세션 상세 조회가 완료되면 Then 상단 헤더에 활성화된 북마크 버튼(★, .bookmarked)이 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-bookmarked',
+          title: '북마크된 세션',
+          snippet: '스니펫',
+          isBookmarked: true,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-bookmarked',
+        title: '북마크된 세션',
+        isBookmarked: true,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변입니다', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 채팅 모달 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 세션 클릭하여 로드
+      await act(async () => {
+        fireEvent.click(screen.getByText('북마크된 세션'));
+      });
+
+      // 상단 헤더에 세션 북마크 버튼이 렌더링되고 활성화(★, bookmarked) 상태여야 함
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('★');
+      expect(headerBookmarkBtn).toHaveAttribute('aria-label', expect.stringContaining('보관 해제'));
+    });
+
+    it('Given 북마크되지 않은 세션을 로드했을 때 When 세션 상세 조회가 완료되면 Then 상단 헤더에 비활성화된 북마크 버튼(☆)이 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-normal',
+          title: '일반 세션',
+          snippet: '스니펫',
+          isBookmarked: false,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-normal',
+        title: '일반 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변입니다', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('일반 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+      expect(headerBookmarkBtn).toHaveAttribute('aria-label', expect.stringContaining('보관'));
+    });
+
+    it('Given 상단 헤더 북마크 버튼이 있을 때 When 클릭하면 Then toggleSessionBookmark API가 호출되고 상단 버튼 및 사이드바 목록 상태가 토글된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-toggle',
+          title: '토글 대상 세션',
+          snippet: '스니펫',
+          isBookmarked: false,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-toggle',
+        title: '토글 대상 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.toggleSessionBookmark).mockResolvedValueOnce({
+        sessionId: 'sess-toggle',
+        bookmarked: true,
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('토글 대상 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header') as HTMLButtonElement;
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+
+      // 상단 헤더 북마크 버튼 클릭
+      await act(async () => {
+        fireEvent.click(headerBookmarkBtn);
+      });
+
+      expect(aiApi.toggleSessionBookmark).toHaveBeenCalledWith('sess-toggle', true);
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('★');
+
+      // 사이드바의 버튼도 동기화되었는지 확인
+      const sidebarBookmarkBtn = document.querySelector('.session-item-actions .btn-bookmark-session');
+      expect(sidebarBookmarkBtn).toHaveClass('bookmarked');
+      expect(sidebarBookmarkBtn).toHaveTextContent('★');
+    });
+
+    it('Given 사이드바 세션 목록에서 현재 세션의 북마크를 토글할 때 When 실행되면 Then 상단 헤더 북마크 버튼 상태도 동기화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-sync',
+          title: '동기화 세션',
+          snippet: '스니펫',
+          isBookmarked: true,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-sync',
+        title: '동기화 세션',
+        isBookmarked: true,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.toggleSessionBookmark).mockResolvedValueOnce({
+        sessionId: 'sess-sync',
+        bookmarked: false,
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('동기화 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+
+      // 사이드바 북마크 버튼 클릭으로 해제
+      const sidebarBookmarkBtn = document.querySelector('.session-item-actions .btn-bookmark-session') as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(sidebarBookmarkBtn);
+      });
+
+      expect(aiApi.toggleSessionBookmark).toHaveBeenCalledWith('sess-sync', false);
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+    });
+
+    it('Given 신규 대화 상태(sessionId가 없음)일 때 When 상단 헤더를 확인하면 Then 세션 북마크 버튼이 렌더링되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).not.toBeInTheDocument();
+    });
+
+    it('Given 세션이 로드된 후 새 대화(handleNewChat)를 시작할 때 When 전환되면 Then 상단 북마크 버튼이 제거되고 상태가 초기화된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-loaded',
+          title: '불러온 세션',
+          isBookmarked: true,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-loaded',
+        title: '불러온 세션',
+        isBookmarked: true,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('불러온 세션'));
+      });
+
+      expect(document.querySelector('.btn-session-bookmark-header')).toBeInTheDocument();
+
+      // 새 대화 시작 버튼(+) 클릭
+      const newChatBtn = screen.getByRole('button', { name: /새 대화 시작/i });
+      await act(async () => {
+        fireEvent.click(newChatBtn);
+      });
+
+      expect(document.querySelector('.btn-session-bookmark-header')).not.toBeInTheDocument();
+    });
+
+    it('Given 신규 대화에서 첫 질문 완료 후 새 sessionId가 생성되었을 때 When 상단 헤더를 확인하면 Then 초기 세션 북마크 상태는 false(☆)로 유지된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+
+      let sessionCreatedCallback: ((id: string) => void) | undefined;
+      let doneCallback: (() => void) | undefined;
+
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        doneCallback = args[2] as (() => void) | undefined;
+        sessionCreatedCallback = args[8] as ((id: string) => void) | undefined;
+        return Object.assign(Promise.resolve(), { cancel: vi.fn() });
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 질문 입력 및 전송
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '새로운 질문입니다' } });
+      });
+
+      const form = input.closest('form')!;
+      await act(async () => {
+        fireEvent.submit(form);
+      });
+
+      // 새 sessionId 발급 및 스트리밍 완료 시뮬레이션
+      await act(async () => {
+        if (sessionCreatedCallback) sessionCreatedCallback('new-session-123');
+        if (doneCallback) doneCallback();
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+    });
+
+    it('QA: Given isBookmarked 필드가 누락된 레거시 세션 데이터를 로드했을 때 When 조회가 완료되면 Then 상단 헤더 북마크 버튼이 기본값 false(☆)로 안전하게 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-legacy',
+          title: '레거시 세션',
+          snippet: '스니펫',
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      // isBookmarked 속성이 아예 없는 레거시 응답
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-legacy',
+        title: '레거시 세션',
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('레거시 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+      expect(headerBookmarkBtn).toHaveAttribute('aria-label', expect.stringContaining('보관'));
+    });
+
+    it('QA: Given 상단 헤더 북마크 버튼 클릭 시 토글 API가 실패(에러 발생)했을 때 Then 에러 토스트가 노출되고 상단 헤더 버튼의 북마크 상태는 변경되지 않고 유지된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-error-test',
+          title: '에러 테스트 세션',
+          isBookmarked: false,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-error-test',
+        title: '에러 테스트 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+      // API 실패 모의
+      vi.mocked(aiApi.toggleSessionBookmark).mockRejectedValueOnce(new Error('Network error'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('에러 테스트 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header') as HTMLButtonElement;
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+
+      // 클릭 시 에러 발생
+      await act(async () => {
+        fireEvent.click(headerBookmarkBtn);
+      });
+
+      // 상태 변경 실패 -> 여전히 북마크되지 않은 상태 유지
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+      // 에러 토스트 표시 확인
+      expect(screen.getByText('세션 보관 상태 변경에 실패했습니다.')).toBeInTheDocument();
+    });
+
+    it('QA: Given 사이드바에서 현재 활성 세션이 아닌 다른 세션의 북마크를 토글할 때 Then 현재 활성 세션의 상단 헤더 북마크 상태는 영향을 받지 않고 유지된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-active',
+          title: '현재 활성 세션',
+          isBookmarked: true,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+        {
+          sessionId: 'sess-other',
+          title: '다른 세션',
+          isBookmarked: false,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-active',
+        title: '현재 활성 세션',
+        isBookmarked: true,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.toggleSessionBookmark).mockResolvedValueOnce({
+        sessionId: 'sess-other',
+        bookmarked: true,
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 활성 세션 로드
+      await act(async () => {
+        fireEvent.click(screen.getByText('현재 활성 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header');
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('★');
+
+      // 사이드바의 '다른 세션' 북마크 버튼 클릭
+      const sessionItems = document.querySelectorAll('.session-item');
+      expect(sessionItems.length).toBe(2);
+      const otherSessionItem = Array.from(sessionItems).find((el) =>
+        el.textContent?.includes('다른 세션'),
+      );
+      const otherBookmarkBtn = otherSessionItem?.querySelector('.btn-bookmark-session') as HTMLButtonElement;
+      expect(otherBookmarkBtn).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(otherBookmarkBtn);
+      });
+
+      expect(aiApi.toggleSessionBookmark).toHaveBeenCalledWith('sess-other', true);
+      // 현재 활성 세션의 상단 헤더 북마크 상태는 그대로 유지
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('★');
+    });
+
+    it('QA: Given 사이드바 목록(sessions)에 포함되지 않은 세션이 로드되었을 때 When 상단 헤더 북마크 버튼을 클릭하면 Then 정상적으로 API가 호출되고 상단 헤더 상태가 토글된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      // 사이드바 목록에는 sess-external이 없음
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        {
+          sessionId: 'sess-list-item',
+          title: '목록 세션',
+          isBookmarked: false,
+          updatedAt: '2026-11-18T00:00:00Z',
+        },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-external',
+        title: '외부 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-18T00:00:00Z',
+        updatedAt: '2026-11-18T00:00:00Z',
+        turns: [
+          { role: 'user', content: '외부 질문', createdAt: '2026-11-18T00:00:00Z' },
+          { role: 'assistant', content: '외부 답변', createdAt: '2026-11-18T00:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.toggleSessionBookmark).mockResolvedValueOnce({
+        sessionId: 'sess-external',
+        bookmarked: true,
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 사이드바 목록 세션을 클릭하는 대신, 보관함 탭 등에서 handleLoadSession이 호출된 상황 시뮬레이션
+      // 목록 세션 클릭 후 상세 조회를 sess-external로 반환하도록 설정
+      await act(async () => {
+        fireEvent.click(screen.getByText('목록 세션'));
+      });
+
+      const headerBookmarkBtn = document.querySelector('.btn-session-bookmark-header') as HTMLButtonElement;
+      expect(headerBookmarkBtn).toBeInTheDocument();
+      expect(headerBookmarkBtn).not.toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('☆');
+
+      // 상단 헤더 북마크 버튼 클릭
+      await act(async () => {
+        fireEvent.click(headerBookmarkBtn);
+      });
+
+      expect(aiApi.toggleSessionBookmark).toHaveBeenCalledWith('sess-external', true);
+      expect(headerBookmarkBtn).toHaveClass('bookmarked');
+      expect(headerBookmarkBtn).toHaveTextContent('★');
+      expect(screen.getByText('세션이 보관되었습니다.')).toBeInTheDocument();
+    });
+  });
 });
