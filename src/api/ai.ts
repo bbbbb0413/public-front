@@ -320,6 +320,7 @@ export interface SessionDetailOut {
   turns: SessionTurn[];
   createdAt: string;
   updatedAt: string;
+  isBookmarked?: boolean;
 }
 
 export const getSessions = async (

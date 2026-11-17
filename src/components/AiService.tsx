@@ -189,6 +189,8 @@ export const AiService = () => {
   const [currentProgress, setCurrentProgress] = useState<AgentProgress | null>(null);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentSessionTitle, setCurrentSessionTitle] = useState<string>('');
+  const [isCurrentSessionBookmarked, setIsCurrentSessionBookmarked] = useState<boolean>(false);
   const [sessions, setSessions] = useState<SessionOut[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = useState('');
@@ -300,14 +302,17 @@ export const AiService = () => {
     }
   };
 
-  const handleToggleSessionBookmark = async (sId: string, currentBookmarked: boolean, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggleSessionBookmark = async (sId: string, currentBookmarked: boolean, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const nextStatus = !currentBookmarked;
       await toggleSessionBookmark(sId, nextStatus);
       setSessions((prev) =>
         prev.map((s) => (s.sessionId === sId ? { ...s, isBookmarked: nextStatus } : s)),
       );
+      if (sessionId === sId) {
+        setIsCurrentSessionBookmarked(nextStatus);
+      }
       if (sidebarTab === 'bookmarks') {
         fetchBookmarks();
       }
@@ -464,6 +469,8 @@ export const AiService = () => {
     }
     setIsStreaming(false);
     setSessionId(null);
+    setCurrentSessionTitle('');
+    setIsCurrentSessionBookmarked(false);
     setChatLog([]);
     setStreamingAnswer('');
     streamingAnswerRef.current = '';
@@ -536,6 +543,8 @@ export const AiService = () => {
       if (!detail) return;
       setActiveFeedbackTurns({});
       setSessionId(detail.sessionId);
+      setCurrentSessionTitle(detail.title || '');
+      setIsCurrentSessionBookmarked(Boolean(detail.isBookmarked));
       const loaded: ChatMessage[] = detail.turns.map((t) => ({
         sender: t.role === 'user' ? 'user' : 'ai',
         text: t.content,
@@ -1030,6 +1039,7 @@ export const AiService = () => {
       (newId) => {
         if (currentStreamingIdRef.current !== streamId) return;
         setSessionId(newId);
+        setIsCurrentSessionBookmarked(false);
       },
       (progress) => {
         if (currentStreamingIdRef.current !== streamId) return;
@@ -1635,7 +1645,22 @@ export const AiService = () => {
               <div className="chat-modal-header">
                 <div className="chat-modal-title-row">
                   <span className="chat-modal-icon" aria-hidden="true">🤖</span>
-                  <h3 id="chat-modal-title">문서 기반 AI Q&A</h3>
+                  <h3 id="chat-modal-title">{currentSessionTitle || '문서 기반 AI Q&A'}</h3>
+                  {sessionId && (
+                    <button
+                      type="button"
+                      className={`btn-session-bookmark-header${isCurrentSessionBookmarked ? ' bookmarked' : ''}`}
+                      onClick={(e) => handleToggleSessionBookmark(sessionId, isCurrentSessionBookmarked, e)}
+                      aria-label={
+                        isCurrentSessionBookmarked
+                          ? (currentSessionTitle ? `${currentSessionTitle} 보관 해제` : '세션 보관 해제')
+                          : (currentSessionTitle ? `${currentSessionTitle} 보관` : '세션 보관')
+                      }
+                      title={isCurrentSessionBookmarked ? '보관 해제' : '세션 보관'}
+                    >
+                      {isCurrentSessionBookmarked ? '★' : '☆'}
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={() => setIsChatOpen(false)}
