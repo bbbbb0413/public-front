@@ -233,6 +233,9 @@ export const AiService = () => {
   const [chunks, setChunks] = useState<DocumentChunk[]>([]);
   const [isLoadingChunks, setIsLoadingChunks] = useState<boolean>(false);
   const [chunksError, setChunksError] = useState<string | null>(null);
+  const targetScrollChunkIndexRef = useRef<number | null>(null);
+  const [highlightedChunkIndex, setHighlightedChunkIndex] = useState<number | null>(null);
+  const chunkHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showBookmarkToast = (msg: string) => {
     setBookmarkSuccessMsg(msg);
@@ -425,10 +428,19 @@ export const AiService = () => {
       }
     }
     return [...groups.values()]
-      .map((group) => ({
-        ...group,
-        chunks: [...group.chunks].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)),
-      }))
+      .map((group) => {
+        const uniqueChunksMap = new Map<number, SourceRef>();
+        for (const chunk of group.chunks) {
+          const prev = uniqueChunksMap.get(chunk.chunkIndex);
+          if (!prev || (chunk.score ?? -Infinity) > (prev.score ?? -Infinity)) {
+            uniqueChunksMap.set(chunk.chunkIndex, chunk);
+          }
+        }
+        return {
+          ...group,
+          chunks: [...uniqueChunksMap.values()].sort((a, b) => a.chunkIndex - b.chunkIndex),
+        };
+      })
       .sort((a, b) => (b.maxScore ?? -Infinity) - (a.maxScore ?? -Infinity));
   };
 
@@ -816,6 +828,7 @@ export const AiService = () => {
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      if (chunkHighlightTimerRef.current) clearTimeout(chunkHighlightTimerRef.current);
     };
   }, []);
 
@@ -831,6 +844,16 @@ export const AiService = () => {
   }, [chatLog]);
 
   useEffect(() => {
+    if (targetScrollChunkIndexRef.current !== null) {
+      const targetIdx = targetScrollChunkIndexRef.current;
+      const el = document.querySelector(`[data-chunk-index="${targetIdx}"]`);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [chunks]);
+
+  useEffect(() => {
     if (!deletingBookmark) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isDeletingBookmark) {
@@ -841,24 +864,53 @@ export const AiService = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [deletingBookmark, isDeletingBookmark]);
 
-  const handleOpenChunks = async (
-    doc: DocumentInfo | { id: string; fileName: string; chunkCount?: number },
-  ) => {
-    setViewingChunksDoc(doc);
-    setIsLoadingChunks(true);
-    setChunksError(null);
-    setChunks([]);
-    try {
-      const data = await getDocumentChunks(doc.id);
-      setChunks(data);
-    } catch {
-      setChunksError('청크 목록을 불러오지 못했습니다.');
-    } finally {
-      setIsLoadingChunks(false);
-    }
-  };
+  const handleOpenChunks = useCallback(
+    async (
+      doc: DocumentInfo | { id: string; fileName: string; chunkCount?: number },
+      targetChunkIndex?: number | null,
+    ) => {
+      if (chunkHighlightTimerRef.current) {
+        clearTimeout(chunkHighlightTimerRef.current);
+        chunkHighlightTimerRef.current = null;
+      }
+      const validTargetIndex = typeof targetChunkIndex === 'number' ? targetChunkIndex : null;
+      targetScrollChunkIndexRef.current = validTargetIndex;
+      setHighlightedChunkIndex(validTargetIndex);
+
+      setViewingChunksDoc(doc);
+      setIsLoadingChunks(true);
+      setChunksError(null);
+      setChunks([]);
+      try {
+        const data = await getDocumentChunks(doc.id);
+        setChunks(data);
+        if (validTargetIndex !== null) {
+          chunkHighlightTimerRef.current = setTimeout(() => {
+            setHighlightedChunkIndex(null);
+          }, 2000);
+          setTimeout(() => {
+            const el = document.querySelector(`[data-chunk-index="${validTargetIndex}"]`);
+            if (el && typeof el.scrollIntoView === 'function') {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 0);
+        }
+      } catch {
+        setChunksError('청크 목록을 불러오지 못했습니다.');
+      } finally {
+        setIsLoadingChunks(false);
+      }
+    },
+    [],
+  );
 
   const handleCloseChunksModal = () => {
+    if (chunkHighlightTimerRef.current) {
+      clearTimeout(chunkHighlightTimerRef.current);
+      chunkHighlightTimerRef.current = null;
+    }
+    setHighlightedChunkIndex(null);
+    targetScrollChunkIndexRef.current = null;
     setViewingChunksDoc(null);
     setChunks([]);
     setChunksError(null);
@@ -1346,6 +1398,7 @@ export const AiService = () => {
                             {isCompleted ? (
                               <button
                                 type="button"
+                                // eslint-disable-next-line react-hooks/refs
                                 onClick={() => handleOpenChunks(doc)}
                                 className="btn-chunk-count"
                                 title="청크 목록 보기"
@@ -2028,6 +2081,22 @@ export const AiService = () => {
                                                 <span className="source-ref-chunk">
                                                   청크 #{chunk.chunkIndex + 1}
                                                 </span>
+                                                <button
+                                                  type="button"
+                                                  className="btn-view-chunk-detail"
+                                                  onClick={() =>
+                                                    handleOpenChunks(
+                                                      {
+                                                        id: group.documentId,
+                                                        fileName: group.fileName,
+                                                        chunkCount: group.chunks.length,
+                                                      },
+                                                      chunk.chunkIndex,
+                                                    )
+                                                  }
+                                                >
+                                                  전문 보기
+                                                </button>
                                                 {typeof chunk.score === 'number' && (
                                                   <span className="source-ref-score">
                                                     관련도 {Math.round(chunk.score * 100)}%
@@ -2200,6 +2269,22 @@ export const AiService = () => {
                                             <span className="source-ref-chunk">
                                               청크 #{chunk.chunkIndex + 1}
                                             </span>
+                                            <button
+                                              type="button"
+                                              className="btn-view-chunk-detail"
+                                              onClick={() =>
+                                                handleOpenChunks(
+                                                  {
+                                                    id: group.documentId,
+                                                    fileName: group.fileName,
+                                                    chunkCount: group.chunks.length,
+                                                  },
+                                                  chunk.chunkIndex,
+                                                )
+                                              }
+                                            >
+                                              전문 보기
+                                            </button>
                                             {typeof chunk.score === 'number' && (
                                               <span className="source-ref-score">
                                                 관련도 {Math.round(chunk.score * 100)}%
@@ -2482,7 +2567,11 @@ export const AiService = () => {
               {!isLoadingChunks && !chunksError && chunks.length > 0 && (
                 <div className="chunk-list">
                   {chunks.map((chunk) => (
-                    <div key={chunk.chunkIndex} className="chunk-item">
+                    <div
+                      key={chunk.chunkIndex}
+                      className={`chunk-item${chunk.chunkIndex === highlightedChunkIndex ? ' highlighted-chunk' : ''}`}
+                      data-chunk-index={chunk.chunkIndex}
+                    >
                       <div className="chunk-item-header">
                         <span className="chunk-badge">청크 #{chunk.chunkIndex + 1}</span>
                       </div>

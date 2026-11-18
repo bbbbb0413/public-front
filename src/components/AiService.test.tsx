@@ -13648,4 +13648,377 @@ describe('AiService Component', () => {
       expect(screen.getByText('세션이 보관되었습니다.')).toBeInTheDocument();
     });
   });
+
+  describe('SPEC-106: AI 답변 참고 문서(출처)의 개별 청크 모달 위치 이동·강조 연동 및 출처 청크 번호 오름차순 정렬', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-spec106', nickName: 'Tester106' },
+      token: 'jwt-token-106',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    const mockChunksSpec106 = [
+      { chunkIndex: 0, text: '첫 번째 청크 본문 (인덱스 0)' },
+      { chunkIndex: 1, text: '두 번째 청크 본문 (인덱스 1)' },
+      { chunkIndex: 2, text: '세 번째 청크 본문 (인덱스 2)' },
+      { chunkIndex: 3, text: '네 번째 청크 본문 (인덱스 3)' },
+      { chunkIndex: 4, text: '다섯 번째 청크 본문 (인덱스 4)' },
+    ];
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    });
+
+    it('동일 문서 내 출처 청크 목록이 chunkIndex 오름차순으로 정렬되고 동일 청크 인덱스 중복 시 최고 score 청크가 보존된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec106-sort',
+        title: '정렬 테스트 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-19T00:00:00Z',
+        updatedAt: '2026-11-19T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-19T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-19T00:00:01Z',
+            sources: [
+              { documentId: 'doc-1', fileName: 'sample.pdf', chunkIndex: 4, score: 0.82, snippet: '스니펫 4' },
+              { documentId: 'doc-1', fileName: 'sample.pdf', chunkIndex: 1, score: 0.55, snippet: '스니펫 1 낮은 점수' },
+              { documentId: 'doc-1', fileName: 'sample.pdf', chunkIndex: 3, score: 0.91, snippet: '스니펫 3' },
+              { documentId: 'doc-1', fileName: 'sample.pdf', chunkIndex: 1, score: 0.77, snippet: '스니펫 1 높은 점수' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec106-sort', title: '정렬 테스트 세션', updatedAt: '2026-11-19T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('정렬 테스트 세션'));
+      });
+
+      // 참고 문서 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /sample\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 청크 메타 span 목록 확인 (청크 #2, 청크 #4, 청크 #5 순서)
+      const chunkBadges = screen.getAllByText(/^청크 #\d+$/);
+      const chunkTexts = chunkBadges.map((el) => el.textContent);
+      expect(chunkTexts).toEqual(['청크 #2', '청크 #4', '청크 #5']);
+
+      // 중복된 청크 #2(chunkIndex 1)는 더 높은 score 0.77(77%)이 보존되어야 함
+      expect(screen.getByText('관련도 77%')).toBeInTheDocument();
+      expect(screen.queryByText('관련도 55%')).not.toBeInTheDocument();
+      expect(screen.getByText('스니펫 1 높은 점수')).toBeInTheDocument();
+      expect(screen.queryByText('스니펫 1 낮은 점수')).not.toBeInTheDocument();
+
+      // 각 청크에 [전문 보기] 버튼이 존재해야 함
+      const detailButtons = screen.getAllByRole('button', { name: '전문 보기' });
+      expect(detailButtons).toHaveLength(3);
+    });
+
+    it('개별 청크의 [전문 보기] 버튼 클릭 시 모달이 열리고 대상 청크로 자동 스크롤되며 2초간 highlighted-chunk 클래스가 적용된다', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockSession: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec106-modal',
+          title: '전문보기 모달 세션',
+          isBookmarked: false,
+          createdAt: '2026-11-19T00:00:00Z',
+          updatedAt: '2026-11-19T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문입니다', createdAt: '2026-11-19T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '답변입니다',
+              createdAt: '2026-11-19T00:00:01Z',
+              sources: [
+                { documentId: 'doc-scroll-1', fileName: 'guide.pdf', chunkIndex: 3, score: 0.85, snippet: '스니펫 3' },
+              ],
+            },
+          ],
+        };
+
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          { sessionId: 'sess-spec106-modal', title: '전문보기 모달 세션', updatedAt: '2026-11-19T00:00:00Z' },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+        vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunksSpec106);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('전문보기 모달 세션'));
+        });
+
+        const docToggleBtn = screen.getByRole('button', { name: /guide\.pdf/i });
+        await act(async () => {
+          fireEvent.click(docToggleBtn);
+        });
+
+        const detailBtn = screen.getByRole('button', { name: '전문 보기' });
+        await act(async () => {
+          fireEvent.click(detailBtn);
+        });
+
+        expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-scroll-1');
+
+        // 모달 열림 확인
+        expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+        // data-chunk-index 속성 및 highlighted-chunk 클래스 확인
+        const targetChunkEl = document.querySelector('[data-chunk-index="3"]');
+        expect(targetChunkEl).not.toBeNull();
+        expect(targetChunkEl).toHaveClass('highlighted-chunk');
+
+        // 다른 청크는 강조되지 않아야 함
+        const nonTargetChunkEl = document.querySelector('[data-chunk-index="1"]');
+        expect(nonTargetChunkEl).not.toBeNull();
+        expect(nonTargetChunkEl).not.toHaveClass('highlighted-chunk');
+
+        // scrollIntoView 호출 확인
+        expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+          behavior: 'smooth',
+          block: 'center',
+        });
+
+        // 2초 경과 후 하이라이트 해제 확인
+        act(() => {
+          vi.advanceTimersByTime(2000);
+        });
+
+        expect(document.querySelector('.highlighted-chunk')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('타깃 청크 없이 문서 헤더의 [청크 목록] 버튼으로 모달을 열었을 때 강조나 스크롤 이동 없이 전체 목록이 정상 렌더링된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec106-header',
+        title: '헤더 청크목록 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-19T00:00:00Z',
+        updatedAt: '2026-11-19T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-19T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-19T00:00:01Z',
+            sources: [
+              { documentId: 'doc-header-1', fileName: 'guide.pdf', chunkIndex: 2, score: 0.85, snippet: '스니펫 2' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec106-header', title: '헤더 청크목록 세션', updatedAt: '2026-11-19T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunksSpec106);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('헤더 청크목록 세션'));
+      });
+
+      // 문서 헤더의 [청크 목록] 버튼 클릭
+      const viewDocChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      await act(async () => {
+        fireEvent.click(viewDocChunksBtn);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-header-1');
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      // scrollIntoView가 center block으로 호출되지 않아야 함
+      expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalledWith(
+        expect.objectContaining({ block: 'center' }),
+      );
+      // highlighted-chunk가 없어야 함
+      expect(document.querySelector('.highlighted-chunk')).toBeNull();
+    });
+
+    it('스트리밍 중 실시간 출처에서도 청크 번호 오름차순 정렬 및 각 청크의 [전문 보기] 버튼 클릭 시 모달 연동이 동작한다', async () => {
+      let capturedOnSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        capturedOnSources = args[6] as ((sources: aiApi.SourceRef[]) => void) | undefined;
+        return {
+          cancel: vi.fn(),
+        } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunksSpec106);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/);
+      const sendBtn = screen.getByRole('button', { name: '전송' });
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '스트리밍 테스트 질문' } });
+        fireEvent.click(sendBtn);
+      });
+
+      // 출처 수신 (청크 4, 1 순서로 수신)
+      expect(capturedOnSources).toBeDefined();
+      await act(async () => {
+        capturedOnSources!([
+          { fileName: 'stream_doc.pdf', chunkIndex: 4, documentId: 'doc-stream-spec106', snippet: '스니펫 4' },
+          { fileName: 'stream_doc.pdf', chunkIndex: 1, documentId: 'doc-stream-spec106', snippet: '스니펫 1' },
+        ]);
+      });
+
+      // 문서 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /stream_doc\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 청크 1, 4 순으로 정렬되었는지 확인
+      const chunkBadges = screen.getAllByText(/^청크 #\d+$/);
+      const chunkTexts = chunkBadges.map((el) => el.textContent);
+      expect(chunkTexts).toEqual(['청크 #2', '청크 #5']);
+
+      // 전문 보기 버튼 클릭 시 모달 열기 확인
+      const detailBtns = screen.getAllByRole('button', { name: '전문 보기' });
+      expect(detailBtns).toHaveLength(2);
+
+      await act(async () => {
+        fireEvent.click(detailBtns[1]); // 청크 #5 (chunkIndex 4)
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-stream-spec106');
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(document.querySelector('[data-chunk-index="4"]')).toHaveClass('highlighted-chunk');
+    });
+
+    it('모달을 닫으면 강조 상태 및 타깃 ref가 초기화된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec106-close',
+        title: '모달 닫기 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-19T00:00:00Z',
+        updatedAt: '2026-11-19T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-19T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-19T00:00:01Z',
+            sources: [
+              { documentId: 'doc-close-1', fileName: 'guide.pdf', chunkIndex: 2, score: 0.85, snippet: '스니펫 2' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec106-close', title: '모달 닫기 세션', updatedAt: '2026-11-19T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mockChunksSpec106);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('모달 닫기 세션'));
+      });
+
+      const docToggleBtn = screen.getByRole('button', { name: /guide\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '전문 보기' }));
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      // 모달 닫기
+      const closeBtn = screen.getByRole('button', { name: '청크 모달 닫기' });
+      await act(async () => {
+        fireEvent.click(closeBtn);
+      });
+
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 헤더 [청크 목록] 버튼으로 다시 열었을 때 이전 하이라이트가 남아있지 않아야 함
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '청크 목록' }));
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(document.querySelector('.highlighted-chunk')).toBeNull();
+    });
+  });
 });
