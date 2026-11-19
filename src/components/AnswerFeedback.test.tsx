@@ -615,12 +615,69 @@ describe('AnswerFeedback', () => {
         helpfulness: 4,
         comment: '',
       };
-      render(<AnswerFeedback existing={existingEmptyComment} onSubmit={vi.fn()} />);
+      const { rerender } = render(
+        <AnswerFeedback existing={existingEmptyComment} onSubmit={vi.fn()} />,
+      );
 
       expect(screen.getByTestId('feedback-summary')).toHaveTextContent(
         '내 평가 · 정확도 4/5 · 유용성 4/5',
       );
       expect(screen.queryByTestId('feedback-summary-reasons')).not.toBeInTheDocument();
+
+      rerender(
+        <AnswerFeedback
+          existing={{ ...existingEmptyComment, comment: null }}
+          onSubmit={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('feedback-summary-reasons')).not.toBeInTheDocument();
+
+      rerender(
+        <AnswerFeedback
+          existing={{ ...existingEmptyComment, comment: '   ' }}
+          onSubmit={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('feedback-summary-reasons')).not.toBeInTheDocument();
+    });
+
+    it('QA 1: 5개 모든 불만족 사유 태그가 포함된 경우 순서대로 5개 배지가 모두 렌더링된다', () => {
+      const allReasonsComment =
+        '[환각/사실 오류] [근거 문서와 다름] [질문 의도와 무관] [내용 불완전/부족] [최신 정보 아님] 종합적으로 부족합니다.';
+      const existingAllReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: allReasonsComment,
+      };
+      render(<AnswerFeedback existing={existingAllReasons} onSubmit={vi.fn()} />);
+
+      const reasonTags = screen.getAllByText(
+        /^(환각\/사실 오류|근거 문서와 다름|질문 의도와 무관|내용 불완전\/부족|최신 정보 아님)$/,
+      );
+      expect(reasonTags).toHaveLength(5);
+      expect(reasonTags[0]).toHaveTextContent('환각/사실 오류');
+      expect(reasonTags[1]).toHaveTextContent('근거 문서와 다름');
+      expect(reasonTags[2]).toHaveTextContent('질문 의도와 무관');
+      expect(reasonTags[3]).toHaveTextContent('내용 불완전/부족');
+      expect(reasonTags[4]).toHaveTextContent('최신 정보 아님');
+    });
+
+    it('QA 2: 코멘트에 일반 본문이 섞여 있어도 사유 태그만 정확히 분리되어 배지로 렌더링된다', () => {
+      const mixedComment = '[환각/사실 오류] 문서에는 2024년으로 적혀있는데 2020년이라고 답변함 [근거 문서와 다름]';
+      const existingMixed: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 2,
+        helpfulness: 2,
+        comment: mixedComment,
+      };
+      render(<AnswerFeedback existing={existingMixed} onSubmit={vi.fn()} />);
+
+      const reasonsContainer = screen.getByTestId('feedback-summary-reasons');
+      expect(reasonsContainer).toBeInTheDocument();
+      const reasonTags = screen.getAllByText(/^(환각\/사실 오류|근거 문서와 다름)$/);
+      expect(reasonTags).toHaveLength(2);
+      expect(reasonsContainer).not.toHaveTextContent('문서에는 2024년으로 적혀있는데');
     });
   });
 });
