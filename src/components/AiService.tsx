@@ -1745,6 +1745,14 @@ export const AiService = () => {
                     !isUngrounded;
                   const displayMissing = getSanitizedMissing(msg.missing);
                   const hasMissing = isAi && !isUngrounded && displayMissing.length > 0;
+                  const currentFeedback = feedbackByTurn[turnIndex];
+                  const hasNegativeFeedback =
+                    isAi &&
+                    !msg.isError &&
+                    !msg.isCancelled &&
+                    currentFeedback?.accuracy !== undefined &&
+                    currentFeedback.accuracy !== null &&
+                    currentFeedback.accuracy <= 2;
 
                   return (
                     <div
@@ -1753,7 +1761,7 @@ export const AiService = () => {
                       data-turn-index={turnIndex}
                     >
                       <div
-                        className={`message-bubble${hasMissing ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
+                        className={`message-bubble${hasMissing ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${hasNegativeFeedback ? ' has-negative-feedback' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
                         data-turn-index={turnIndex}
                       >
                         {hasMissing && (
@@ -1764,6 +1772,11 @@ export const AiService = () => {
                         {isLowConfidence && (
                           <div className="low-confidence-badge" data-testid="low-confidence-badge">
                             [답변 신뢰도 낮음]
+                          </div>
+                        )}
+                        {hasNegativeFeedback && (
+                          <div className="negative-feedback-badge" data-testid="negative-feedback-badge">
+                            [사용자 평가: 부정확]
                           </div>
                         )}
                         {msg.sender === 'ai' ? (
