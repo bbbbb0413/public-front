@@ -256,6 +256,10 @@ export const AnswerFeedback = ({
   };
 
   if (!isOpen) {
+    const reasons = effectiveExisting
+      ? parseReasonsFromComment(effectiveExisting.comment ?? '')
+      : [];
+
     return (
       <div className="answer-feedback collapsed" data-testid="answer-feedback">
         {effectiveExisting ? (
@@ -270,6 +274,15 @@ export const AnswerFeedback = ({
             >
               내 평가 · 정확도 {effectiveExisting.accuracy}/5 · 유용성 {effectiveExisting.helpfulness}/5
             </span>
+            {reasons.length > 0 && (
+              <div className="feedback-summary-reasons" data-testid="feedback-summary-reasons">
+                {reasons.map((reason) => (
+                  <span key={reason} className="feedback-summary-reason-tag">
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            )}
             <span className="feedback-edit-hint">수정</span>
           </button>
         ) : (

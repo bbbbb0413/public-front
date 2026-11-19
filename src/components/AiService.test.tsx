@@ -14263,4 +14263,270 @@ describe('AiService Component', () => {
       expect(document.querySelector('.highlighted-chunk')).toBeNull();
     });
   });
+
+  describe('SPEC-107: 답변 평가 부정확 상태 시각화 및 배지 연동', () => {
+    const mockAuth = {
+      user: { uuid: 'test-user-spec107', nickName: 'Tester107' },
+      token: 'jwt-token-107',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    it('세션 복원 시 정확도 1~2점 피드백이 있는 답변 버블에 has-negative-feedback 클래스와 [사용자 평가: 부정확] 배지가 렌더링된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-107-1',
+        title: '부정확 평가 세션',
+        createdAt: '2026-11-20T00:00:00Z',
+        updatedAt: '2026-11-20T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-20T00:00:00Z' },
+          { role: 'assistant', content: '틀린 답변입니다', createdAt: '2026-11-20T00:00:01Z' },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-107-1', title: '부정확 평가 세션', updatedAt: '2026-11-20T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-spec-107-1',
+          turnIndex: 1,
+          accuracy: 2,
+          helpfulness: 1,
+          comment: '[환각/사실 오류] 사실과 다른 답변입니다',
+          createdAt: '2026-11-20T00:00:02Z',
+          updatedAt: '2026-11-20T00:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('부정확 평가 세션'));
+      });
+
+      // 1. 배지와 버블 클래스 확인
+      const badge = screen.getByTestId('negative-feedback-badge');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent('[사용자 평가: 부정확]');
+
+      const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(bubble).toHaveClass('has-negative-feedback');
+
+      // 2. 접힌 피드백 요약 영역에 사유 태그도 함께 표시되는지 확인
+      expect(screen.getByTestId('feedback-summary-reasons')).toBeInTheDocument();
+      expect(screen.getByText('환각/사실 오류')).toBeInTheDocument();
+    });
+
+    it('답변 평가를 1점으로 제출하면 메시지 버블에 has-negative-feedback 클래스와 배지가 즉시 렌더링되고, 4점으로 수정하면 제거된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-107-2',
+        title: '피드백 제출 수정 세션',
+        createdAt: '2026-11-20T00:00:00Z',
+        updatedAt: '2026-11-20T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 2', createdAt: '2026-11-20T00:00:00Z' },
+          { role: 'assistant', content: '답변 2', createdAt: '2026-11-20T00:00:01Z' },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-107-2', title: '피드백 제출 수정 세션', updatedAt: '2026-11-20T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+        sessionId: 'sess-spec-107-2',
+        turnIndex: 1,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: '[근거 문서와 다름]',
+        createdAt: '2026-11-20T00:00:02Z',
+        updatedAt: '2026-11-20T00:00:02Z',
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('피드백 제출 수정 세션'));
+      });
+
+      const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(bubble).not.toHaveClass('has-negative-feedback');
+      expect(screen.queryByTestId('negative-feedback-badge')).not.toBeInTheDocument();
+
+      // 평가하기 클릭 후 정확도 1점 제출
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /이 답변을 평가하기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 1점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 1점/));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /평가 제출/i }));
+      });
+
+      // 제출 후 즉시 배지와 클래스 적용
+      expect(bubble).toHaveClass('has-negative-feedback');
+      expect(screen.getByTestId('negative-feedback-badge')).toBeInTheDocument();
+
+      // 수정: 4점으로 수정 제출
+      vi.mocked(aiApi.submitAnswerFeedback).mockResolvedValueOnce({
+        sessionId: 'sess-spec-107-2',
+        turnIndex: 1,
+        accuracy: 4,
+        helpfulness: 4,
+        comment: '',
+        createdAt: '2026-11-20T00:00:02Z',
+        updatedAt: '2026-11-20T00:00:03Z',
+      });
+
+      const editBtn = screen.getByTestId('answer-feedback').querySelector('.btn-feedback-toggle')!;
+      await act(async () => {
+        fireEvent.click(editBtn);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText(/^정확도 4점/));
+        fireEvent.click(screen.getByLabelText(/^유용성 4점/));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /평가 수정/i }));
+      });
+
+      // 수정 후 즉시 배지와 클래스 제거
+      expect(bubble).not.toHaveClass('has-negative-feedback');
+      expect(screen.queryByTestId('negative-feedback-badge')).not.toBeInTheDocument();
+    });
+
+    it('부정확 평가된 답변에서 평가 삭제 시 has-negative-feedback 클래스와 배지가 즉시 제거된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-107-3',
+        title: '피드백 삭제 세션',
+        createdAt: '2026-11-20T00:00:00Z',
+        updatedAt: '2026-11-20T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 3', createdAt: '2026-11-20T00:00:00Z' },
+          { role: 'assistant', content: '답변 3', createdAt: '2026-11-20T00:00:01Z' },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-107-3', title: '피드백 삭제 세션', updatedAt: '2026-11-20T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-spec-107-3',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '',
+          createdAt: '2026-11-20T00:00:02Z',
+          updatedAt: '2026-11-20T00:00:02Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteAnswerFeedback).mockResolvedValue(undefined as never);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('피드백 삭제 세션'));
+      });
+
+      const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(bubble).toHaveClass('has-negative-feedback');
+      expect(screen.getByTestId('negative-feedback-badge')).toBeInTheDocument();
+
+      // 피드백 토글 버튼 클릭 후 평가 삭제
+      const toggleBtn = screen.getByTestId('answer-feedback').querySelector('.btn-feedback-toggle')!;
+      await act(async () => {
+        fireEvent.click(toggleBtn);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /평가 삭제/i }));
+      });
+
+      // 삭제 후 배지와 클래스 제거 확인
+      expect(bubble).not.toHaveClass('has-negative-feedback');
+      expect(screen.queryByTestId('negative-feedback-badge')).not.toBeInTheDocument();
+    });
+
+    it('에러 메시지 버블 및 중단된 메시지 버블에는 has-negative-feedback 클래스와 경고 배지가 렌더링되지 않는다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-107-isolate',
+        title: '격리 테스트 세션',
+        createdAt: '2026-11-20T00:00:00Z',
+        updatedAt: '2026-11-20T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-20T00:00:00Z' },
+          { role: 'assistant', content: '정상 답변', createdAt: '2026-11-20T00:00:01Z' },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-107-isolate', title: '격리 테스트 세션', updatedAt: '2026-11-20T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('격리 테스트 세션'));
+      });
+
+      // 에러 메시지와 취소 메시지 버블 확인: 일반 정상 답변이 아닌 경우 negative feedback 배지가 없어야 함
+      const badges = screen.queryAllByTestId('negative-feedback-badge');
+      expect(badges).toHaveLength(0);
+    });
+  });
 });
+

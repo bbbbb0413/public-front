@@ -552,6 +552,78 @@ describe('AnswerFeedback', () => {
       expect(screen.getByTestId('answer-feedback')).not.toHaveFocus();
     });
   });
+
+  describe('SPEC-107: 접힌 평가 요약 내 불만족 사유 태그 노출', () => {
+    it('불만족 사유 태그가 포함된 피드백이 존재할 때 접힌 요약에 사유 태그 배지가 렌더링된다', () => {
+      const existingWithReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: '[환각/사실 오류] [근거 문서와 다름] 사실과 다릅니다.',
+      };
+      render(<AnswerFeedback existing={existingWithReasons} onSubmit={vi.fn()} />);
+
+      const summary = screen.getByTestId('feedback-summary');
+      expect(summary).toHaveTextContent('내 평가 · 정확도 1/5 · 유용성 1/5');
+
+      const reasonsContainer = screen.getByTestId('feedback-summary-reasons');
+      expect(reasonsContainer).toBeInTheDocument();
+
+      const reasonTags = screen.getAllByText(/^(환각\/사실 오류|근거 문서와 다름)$/);
+      expect(reasonTags).toHaveLength(2);
+      expect(reasonTags[0]).toHaveClass('feedback-summary-reason-tag');
+      expect(reasonTags[1]).toHaveClass('feedback-summary-reason-tag');
+      expect(reasonTags[0]).toHaveTextContent('환각/사실 오류');
+      expect(reasonTags[1]).toHaveTextContent('근거 문서와 다름');
+    });
+
+    it('사유 태그 배지를 클릭해도 피드백 폼이 펼쳐진다 (이벤트 버블링)', () => {
+      const existingWithReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 1,
+        helpfulness: 1,
+        comment: '[환각/사실 오류] 사실과 다릅니다.',
+      };
+      render(<AnswerFeedback existing={existingWithReasons} onSubmit={vi.fn()} />);
+
+      const tag = screen.getByText('환각/사실 오류');
+      fireEvent.click(tag);
+
+      expect(screen.getByTestId('answer-feedback')).not.toHaveClass('collapsed');
+      expect(screen.getByText('정확도')).toBeInTheDocument();
+    });
+
+    it('사유 태그가 없는 일반 의견 피드백의 경우 사유 태그 영역 없이 기본 점수 요약만 렌더링된다', () => {
+      const existingWithoutReasons: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 2,
+        helpfulness: 2,
+        comment: '내용이 조금 부족해요',
+      };
+      render(<AnswerFeedback existing={existingWithoutReasons} onSubmit={vi.fn()} />);
+
+      expect(screen.getByTestId('feedback-summary')).toHaveTextContent(
+        '내 평가 · 정확도 2/5 · 유용성 2/5',
+      );
+      expect(screen.queryByTestId('feedback-summary-reasons')).not.toBeInTheDocument();
+    });
+
+    it('코멘트가 빈 문자열이거나 공백, null인 경우 사유 태그 영역 없이 기본 점수 요약만 렌더링된다', () => {
+      const existingEmptyComment: AnswerFeedbackOut = {
+        ...existing,
+        accuracy: 4,
+        helpfulness: 4,
+        comment: '',
+      };
+      render(<AnswerFeedback existing={existingEmptyComment} onSubmit={vi.fn()} />);
+
+      expect(screen.getByTestId('feedback-summary')).toHaveTextContent(
+        '내 평가 · 정확도 4/5 · 유용성 4/5',
+      );
+      expect(screen.queryByTestId('feedback-summary-reasons')).not.toBeInTheDocument();
+    });
+  });
 });
+
 
 
