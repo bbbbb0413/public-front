@@ -575,6 +575,7 @@ export const AiService = () => {
         iterations: t.iterations,
         sources: t.sources,
         isCancelled: t.isCancelled ?? false,
+        isError: t.isError ?? false,
         refinedQueries: t.refinedQueries,
       }));
       setChatLog(loaded);

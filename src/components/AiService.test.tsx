@@ -14893,6 +14893,53 @@ describe('AiService Component', () => {
         expect(aiBubble).not.toHaveClass('has-low-confidence');
         expect(aiBubble).not.toHaveClass('is-grounded-verified');
       });
+
+      it('Given 출처(sources) 필드가 누락(undefined)되고 confidence=0.85인 경우에도 isUngrounded로 판정되어 ungrounded-warning 및 has-ungrounded가 적용된다', async () => {
+        const mockSession: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec-108-missing-sources-field',
+          title: '출처 필드 누락 세션',
+          createdAt: '2026-11-21T00:00:00Z',
+          updatedAt: '2026-11-21T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문', createdAt: '2026-11-21T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '출처 필드 자체가 누락된 고신뢰도 답변',
+              confidence: 0.85,
+              // sources 필드 undefined
+              createdAt: '2026-11-21T00:00:01Z',
+            },
+          ],
+        };
+
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          { sessionId: 'sess-spec-108-missing-sources-field', title: '출처 필드 누락 세션', updatedAt: '2026-11-21T00:00:00Z' },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('출처 필드 누락 세션'));
+        });
+
+        const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(bubble).toHaveClass('has-ungrounded');
+        expect(bubble).not.toHaveClass('is-grounded-verified');
+        expect(screen.getByTestId('ungrounded-warning')).toBeInTheDocument();
+        expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      });
     });
 
     describe('고신뢰도 및 근거 충분 답변 검증 배지(isGroundedVerified) 적용', () => {
@@ -14976,6 +15023,15 @@ describe('AiService Component', () => {
               isCancelled: true,
               createdAt: '2026-11-21T00:00:01Z',
             },
+            { role: 'user', content: '질문 2', createdAt: '2026-11-21T00:00:02Z' },
+            {
+              role: 'assistant',
+              content: '에러 발생한 고신뢰도 답변',
+              confidence: 0.9,
+              sources: [{ documentId: 'd2', fileName: 'doc2.pdf', chunkIndex: 0, score: 0.9 }],
+              isError: true,
+              createdAt: '2026-11-21T00:00:03Z',
+            },
           ],
         };
 
@@ -15001,8 +15057,71 @@ describe('AiService Component', () => {
           fireEvent.click(screen.getByText('중단/에러 세션'));
         });
 
-        const cancelledBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        const cancelledBubble = document.querySelector('.chat-message.cancelled .message-bubble');
+        expect(cancelledBubble).toBeInTheDocument();
         expect(cancelledBubble).not.toHaveClass('is-grounded-verified');
+
+        const errorBubble = document.querySelector('.chat-message.error .message-bubble');
+        expect(errorBubble).toBeInTheDocument();
+        expect(errorBubble).not.toHaveClass('is-grounded-verified');
+
+        expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      });
+
+      it('신뢰도가 0.8 미만(0.79)인 정상 답변은 출처가 존재해도 is-grounded-verified 클래스와 grounded-verified-badge가 노출되지 않는다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+
+          if (onSources) {
+            onSources([
+              {
+                documentId: 'doc-sub80',
+                fileName: 'sub80.pdf',
+                chunkIndex: 0,
+                snippet: '신뢰도 79% 근거',
+                score: 0.85,
+              },
+            ]);
+          }
+          onMessage('신뢰도 79%인 중간 신뢰도 답변입니다.');
+          onDone({
+            confidence: 0.79,
+            missing: [],
+          });
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '79% 신뢰도 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(bubble).not.toHaveClass('is-grounded-verified');
+        expect(bubble).not.toHaveClass('has-ungrounded');
+        expect(bubble).not.toHaveClass('has-low-confidence');
         expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
       });
 
@@ -15249,7 +15368,7 @@ describe('AiService Component', () => {
         expect(screen.getByText('관련도 35%')).toHaveClass('score-low');
       });
 
-      it('세션 복원(handleLoadSession) 시에도 has-ungrounded, is-grounded-verified, grounded-verified-badge가 일관되게 렌더링된다', async () => {
+      it('세션 복원(handleLoadSession) 시에도 has-ungrounded, is-grounded-verified, grounded-verified-badge 및 점수 수준별 클래스가 일관되게 렌더링된다', async () => {
         const mockSession: aiApi.SessionDetailOut = {
           sessionId: 'sess-spec-108-restored',
           title: '복원된 세션',
@@ -15269,7 +15388,10 @@ describe('AiService Component', () => {
               role: 'assistant',
               content: '검증 완료 답변 (verified)',
               confidence: 0.9,
-              sources: [{ documentId: 'd1', fileName: 'd.pdf', chunkIndex: 0, score: 0.9 }],
+              sources: [
+                { documentId: 'd1', fileName: 'd.pdf', chunkIndex: 0, score: 0.9 },
+                { documentId: 'd1', fileName: 'd.pdf', chunkIndex: 1, score: 0.65 },
+              ],
               missing: [],
               createdAt: '2026-11-21T00:00:03Z',
             },
@@ -15309,6 +15431,22 @@ describe('AiService Component', () => {
         expect(bubbleTurn3).toHaveClass('is-grounded-verified');
         expect(bubbleTurn3).not.toHaveClass('has-ungrounded');
         expect(within(bubbleTurn3 as HTMLElement).getByTestId('grounded-verified-badge')).toBeInTheDocument();
+
+        // 턴 3의 출처 그룹 최고 관련도 (90%) 및 청크 관련도(90%: score-high, 65%: score-medium) 확인
+        const maxScoreSpan = within(bubbleTurn3 as HTMLElement).getByText('최고 관련도 90%');
+        expect(maxScoreSpan).toHaveClass('source-ref-score');
+        expect(maxScoreSpan).toHaveClass('score-high');
+
+        // 청크 목록 열기
+        const toggleBtn = maxScoreSpan.closest('button.source-ref-item')!;
+        await act(async () => {
+          fireEvent.click(toggleBtn);
+        });
+
+        const score90 = within(bubbleTurn3 as HTMLElement).getByText('관련도 90%');
+        const score65 = within(bubbleTurn3 as HTMLElement).getByText('관련도 65%');
+        expect(score90).toHaveClass('score-high');
+        expect(score65).toHaveClass('score-medium');
       });
     });
   });

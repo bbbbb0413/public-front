@@ -311,6 +311,7 @@ export interface SessionTurn {
   missing?: string[];
   iterations?: number;
   isCancelled?: boolean;
+  isError?: boolean;
   refinedQueries?: string[];
 }
 
