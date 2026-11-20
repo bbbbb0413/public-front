@@ -117,6 +117,16 @@ export const getSanitizedMissing = (missing?: string[]): string[] => {
   });
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
+export const getScoreLevelClass = (score?: number): string => {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return '';
+  }
+  if (score >= 0.8) return 'score-high';
+  if (score >= 0.6) return 'score-medium';
+  return 'score-low';
+};
+
 const getErrorMessage = (error: unknown, fallback = '답변 수신 도중 에러가 발생했습니다.'): string => {
   if (!error) return fallback;
 
@@ -1734,17 +1744,23 @@ export const AiService = () => {
                   const turnIndex = getSessionTurnIndex(chatLog, idx);
                   const isAi = msg.sender === 'ai';
                   const isNoSources = !msg.sources || msg.sources.length === 0;
-                  const isUngrounded =
-                    isAi &&
-                    isNoSources &&
-                    (msg.confidence === 0 || !msg.confidence);
+                  const isUngrounded = isAi && isNoSources;
                   const isLowConfidence =
                     isAi &&
+                    !isNoSources &&
                     msg.confidence !== undefined &&
-                    msg.confidence < 0.6 &&
-                    !isUngrounded;
+                    msg.confidence < 0.6;
                   const displayMissing = getSanitizedMissing(msg.missing);
                   const hasMissing = isAi && !isUngrounded && displayMissing.length > 0;
+                  const isGroundedVerified =
+                    isAi &&
+                    !isNoSources &&
+                    !isUngrounded &&
+                    !hasMissing &&
+                    !msg.isCancelled &&
+                    !msg.isError &&
+                    msg.confidence !== undefined &&
+                    msg.confidence >= 0.8;
                   const currentFeedback = feedbackByTurn[turnIndex];
                   const hasNegativeFeedback =
                     isAi &&
@@ -1761,7 +1777,7 @@ export const AiService = () => {
                       data-turn-index={turnIndex}
                     >
                       <div
-                        className={`message-bubble${hasMissing ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${hasNegativeFeedback ? ' has-negative-feedback' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
+                        className={`message-bubble${hasMissing ? ' has-missing' : ''}${isLowConfidence ? ' has-low-confidence' : ''}${isUngrounded ? ' has-ungrounded' : ''}${isGroundedVerified ? ' is-grounded-verified' : ''}${hasNegativeFeedback ? ' has-negative-feedback' : ''}${turnIndex === highlightedTurnIndex ? ' highlighted-turn' : ''}`}
                         data-turn-index={turnIndex}
                       >
                         {hasMissing && (
@@ -1772,6 +1788,11 @@ export const AiService = () => {
                         {isLowConfidence && (
                           <div className="low-confidence-badge" data-testid="low-confidence-badge">
                             [답변 신뢰도 낮음]
+                          </div>
+                        )}
+                        {isGroundedVerified && (
+                          <div className="grounded-verified-badge" data-testid="grounded-verified-badge">
+                            ✓ 지식베이스 근거 검증 완료
                           </div>
                         )}
                         {hasNegativeFeedback && (
@@ -2057,7 +2078,7 @@ export const AiService = () => {
                                         <span className="source-ref-name">{group.fileName}</span>
                                         <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
                                         {typeof group.maxScore === 'number' && (
-                                          <span className="source-ref-score">
+                                          <span className={`source-ref-score ${getScoreLevelClass(group.maxScore)}`.trim()}>
                                             최고 관련도 {Math.round(group.maxScore * 100)}%
                                           </span>
                                         )}
@@ -2111,7 +2132,7 @@ export const AiService = () => {
                                                   전문 보기
                                                 </button>
                                                 {typeof chunk.score === 'number' && (
-                                                  <span className="source-ref-score">
+                                                  <span className={`source-ref-score ${getScoreLevelClass(chunk.score)}`.trim()}>
                                                     관련도 {Math.round(chunk.score * 100)}%
                                                   </span>
                                                 )}
@@ -2245,7 +2266,7 @@ export const AiService = () => {
                                     <span className="source-ref-name">{group.fileName}</span>
                                     <span className="source-ref-chunk">근거 {group.chunks.length}건</span>
                                     {typeof group.maxScore === 'number' && (
-                                      <span className="source-ref-score">
+                                      <span className={`source-ref-score ${getScoreLevelClass(group.maxScore)}`.trim()}>
                                         최고 관련도 {Math.round(group.maxScore * 100)}%
                                       </span>
                                     )}
@@ -2299,7 +2320,7 @@ export const AiService = () => {
                                               전문 보기
                                             </button>
                                             {typeof chunk.score === 'number' && (
-                                              <span className="source-ref-score">
+                                              <span className={`source-ref-score ${getScoreLevelClass(chunk.score)}`.trim()}>
                                                 관련도 {Math.round(chunk.score * 100)}%
                                               </span>
                                             )}

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import React from 'react';
-import { AiService, getSanitizedMissing, SYSTEM_STATUS_PATTERNS } from './AiService';
+import { AiService, getSanitizedMissing, SYSTEM_STATUS_PATTERNS, getScoreLevelClass } from './AiService';
 import { AuthContext } from '../context/AuthContext';
 import * as aiApi from '../api/ai';
 
@@ -347,6 +347,9 @@ describe('AiService Component', () => {
         };
 
         triggerRefining = () => {
+          _onSources?.([
+            { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.85 },
+          ]);
           onProgress?.({
             iteration: 2,
             phase: 'refining',
@@ -572,6 +575,9 @@ describe('AiService Component', () => {
         onProgress,
       ) => {
         setTimeout(() => {
+          _onSources?.([
+            { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.85 },
+          ]);
           onProgress?.({
             iteration: 2,
             phase: 'refining',
@@ -1486,6 +1492,9 @@ describe('AiService Component', () => {
           onProgress,
         ) => {
           setTimeout(() => {
+            _onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.85 },
+            ]);
             onProgress?.({
               iteration: 1,
               phase: 'critiquing',
@@ -1544,6 +1553,9 @@ describe('AiService Component', () => {
           onProgress,
         ) => {
           setTimeout(() => {
+            _onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.75 },
+            ]);
             onProgress?.({
               iteration: 1,
               phase: 'critiquing',
@@ -2889,6 +2901,9 @@ describe('AiService Component', () => {
             createdAt: '2026-08-29T01:00:01Z',
             confidence: 0.7,
             missing: ['일부 누락 정보'],
+            sources: [
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.7 },
+            ],
           },
         ],
       };
@@ -5622,8 +5637,15 @@ describe('AiService Component', () => {
           _question,
           onMessage,
           onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
         ) => {
           setTimeout(() => {
+            onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.65 },
+            ]);
             onMessage('복합 답변입니다.');
             onDone({
               confidence: 0.65,
@@ -6624,8 +6646,15 @@ describe('AiService Component', () => {
           _question,
           onMessage,
           onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
         ) => {
           setTimeout(() => {
+            onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.75 },
+            ]);
             onMessage('JWT 인증 방식에 대한 답변입니다.');
             onDone({
               confidence: 0.75,
@@ -6694,8 +6723,15 @@ describe('AiService Component', () => {
           _question,
           onMessage,
           onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
         ) => {
           setTimeout(() => {
+            onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.6 },
+            ]);
             onMessage('첫 번째 답변');
             onDone({
               confidence: 0.6,
@@ -6824,6 +6860,9 @@ describe('AiService Component', () => {
             confidence: 0.7,
             iterations: 2,
             missing: ['OAuth2 리프레시 토큰 로테이션'],
+            sources: [
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.7 },
+            ],
           },
         ],
         createdAt: '2026-10-24T00:00:00Z',
@@ -6881,8 +6920,15 @@ describe('AiService Component', () => {
           _question,
           onMessage,
           onDone,
+          _onError,
+          _userId,
+          _chatLog,
+          onSources,
         ) => {
           setTimeout(() => {
+            onSources?.([
+              { documentId: 'doc-1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.65 },
+            ]);
             onMessage('두 건의 결손 항목이 있는 답변');
             onDone({
               confidence: 0.65,
@@ -14752,5 +14798,520 @@ describe('AiService Component', () => {
       expect(screen.queryByTestId('negative-feedback-badge')).not.toBeInTheDocument();
     });
   });
+
+  describe('SPEC-108: AI 답변 근거 충분 검증 배지 및 출처 청크 관련도 수준별 시각화와 근거 미발견 판정 결함 수정', () => {
+    const mockAuth108 = {
+      user: { uuid: 'test-user-spec108', nickName: 'Tester108' },
+      token: 'jwt-token-108',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    describe('getScoreLevelClass 헬퍼 함수 단위 테스트', () => {
+      it('점수 범위에 따라 올바른 수준별 CSS 클래스를 반환하고 예외 케이스는 빈 문자열을 반환한다', () => {
+        // 0.8 이상 -> score-high
+        expect(getScoreLevelClass(1.0)).toBe('score-high');
+        expect(getScoreLevelClass(0.92)).toBe('score-high');
+        expect(getScoreLevelClass(0.8)).toBe('score-high');
+
+        // 0.6 이상 0.8 미만 -> score-medium
+        expect(getScoreLevelClass(0.799)).toBe('score-medium');
+        expect(getScoreLevelClass(0.71)).toBe('score-medium');
+        expect(getScoreLevelClass(0.6)).toBe('score-medium');
+
+        // 0.6 미만 -> score-low
+        expect(getScoreLevelClass(0.599)).toBe('score-low');
+        expect(getScoreLevelClass(0.45)).toBe('score-low');
+        expect(getScoreLevelClass(0)).toBe('score-low');
+
+        // 예외 / 유효하지 않은 숫자 -> ''
+        expect(getScoreLevelClass(undefined)).toBe('');
+        expect(getScoreLevelClass(Number.NaN)).toBe('');
+        expect(getScoreLevelClass(null as unknown as number)).toBe('');
+      });
+    });
+
+    describe('근거 미발견(isUngrounded) 판정 정상화 및 스타일 적용', () => {
+      it('AC 1: Given 출처(sources)가 빈 배열([])이고 confidence=0.75일 때 When 화면에 렌더링되면 Then isUngrounded로 판정되어 ungrounded-warning 배너가 표시되고 버블에 has-ungrounded 클래스가 적용된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+
+          if (onSources) {
+            onSources([]);
+          }
+          onMessage('출처가 전혀 없는 일반 상식 답변입니다.');
+          onDone({
+            confidence: 0.75,
+            missing: [],
+          });
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '일반 지식 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        // ungrounded-warning 배너 노출 확인
+        const warning = screen.getByTestId('ungrounded-warning');
+        expect(warning).toBeInTheDocument();
+        expect(warning).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+
+        // 저신뢰도 배너/배지 및 검증 완료 배지 미노출 확인
+        expect(screen.queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('low-confidence-badge')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+
+        // 버블에 has-ungrounded 클래스 적용 및 다른 상태 클래스 미적용 확인
+        const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(aiBubble).toBeInTheDocument();
+        expect(aiBubble).toHaveClass('has-ungrounded');
+        expect(aiBubble).not.toHaveClass('has-low-confidence');
+        expect(aiBubble).not.toHaveClass('is-grounded-verified');
+      });
+    });
+
+    describe('고신뢰도 및 근거 충분 답변 검증 배지(isGroundedVerified) 적용', () => {
+      it('AC 2: Given 출처가 1건 이상 존재하고 confidence=0.85, missing=[] 정상 AI 답변일 때 When 화면에 렌더링되면 Then is-grounded-verified 클래스와 grounded-verified-badge가 렌더링된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+
+          if (onSources) {
+            onSources([
+              {
+                documentId: 'doc-verify',
+                fileName: 'verified_doc.pdf',
+                chunkIndex: 0,
+                snippet: '충분한 근거 문장입니다.',
+                score: 0.88,
+              },
+            ]);
+          }
+          onMessage('지식베이스 근거가 충분한 검증된 답변입니다.');
+          onDone({
+            confidence: 0.85,
+            missing: [],
+          });
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '검증된 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        // 버블에 is-grounded-verified 클래스 적용 확인
+        const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(aiBubble).toBeInTheDocument();
+        expect(aiBubble).toHaveClass('is-grounded-verified');
+        expect(aiBubble).not.toHaveClass('has-ungrounded');
+        expect(aiBubble).not.toHaveClass('has-low-confidence');
+
+        // 상단 검증 완료 배지 렌더링 확인
+        const badge = screen.getByTestId('grounded-verified-badge');
+        expect(badge).toBeInTheDocument();
+        expect(badge).toHaveClass('grounded-verified-badge');
+        expect(badge).toHaveTextContent('지식베이스 근거 검증 완료');
+      });
+
+      it('AC 5 (경계 케이스): 신뢰도가 85% 이상이지만 isCancelled=true이거나 isError=true일 때 is-grounded-verified 및 grounded-verified-badge가 렌더링되지 않는다', async () => {
+        const mockSession: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec-108-cancelled-error',
+          title: '중단/에러 세션',
+          createdAt: '2026-11-21T00:00:00Z',
+          updatedAt: '2026-11-21T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문 1', createdAt: '2026-11-21T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '중단된 고신뢰도 답변',
+              confidence: 0.95,
+              sources: [{ documentId: 'd1', fileName: 'doc.pdf', chunkIndex: 0, score: 0.95 }],
+              isCancelled: true,
+              createdAt: '2026-11-21T00:00:01Z',
+            },
+          ],
+        };
+
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          { sessionId: 'sess-spec-108-cancelled-error', title: '중단/에러 세션', updatedAt: '2026-11-21T00:00:00Z' },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('중단/에러 세션'));
+        });
+
+        const cancelledBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(cancelledBubble).not.toHaveClass('is-grounded-verified');
+        expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      });
+
+      it('AC 6 (경계 케이스): 신뢰도가 85% 이상이지만 displayMissing 항목이 존재할 때 grounded-verified-badge는 노출되지 않고 missing-warning-badge만 노출된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+
+          if (onSources) {
+            onSources([
+              {
+                documentId: 'doc-missing',
+                fileName: 'partial.pdf',
+                chunkIndex: 0,
+                snippet: '일부 근거',
+                score: 0.9,
+              },
+            ]);
+          }
+          onMessage('일부 항목이 누락된 고신뢰도 답변입니다.');
+          onDone({
+            confidence: 0.88,
+            missing: ['추가 확인이 필요한 세부 규정'],
+          });
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '불완전 답변 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(bubble).not.toHaveClass('is-grounded-verified');
+        expect(bubble).toHaveClass('has-missing');
+        expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+        expect(screen.getByTestId('missing-warning-badge')).toBeInTheDocument();
+      });
+    });
+
+    describe('출처 청크 및 문서 그룹 관련도 점수 수준별 시각화(score-high, score-medium, score-low)', () => {
+      it('AC 3: 관련도가 0.92, 0.71, 0.45인 청크와 maxScore에 각각 score-high, score-medium, score-low 클래스가 적용된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onMessage = args[1];
+          const onDone = args[2];
+          const onSources = args[6];
+
+          const sources = [
+            { documentId: 'doc-multi', fileName: 'multi.pdf', chunkIndex: 0, snippet: '청크 1', score: 0.92 },
+            { documentId: 'doc-multi', fileName: 'multi.pdf', chunkIndex: 1, snippet: '청크 2', score: 0.71 },
+            { documentId: 'doc-multi', fileName: 'multi.pdf', chunkIndex: 2, snippet: '청크 3', score: 0.45 },
+          ];
+
+          if (onSources) {
+            onSources(sources);
+          }
+          onMessage('다양한 점수의 청크가 포함된 답변');
+          onDone({
+            confidence: 0.82,
+            missing: [],
+          });
+          return Promise.resolve();
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '점수 시각화 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+
+        // 문서 그룹 최고 관련도 (0.92 -> 92%)
+        const maxScoreSpan = screen.getByText('최고 관련도 92%');
+        expect(maxScoreSpan).toBeInTheDocument();
+        expect(maxScoreSpan).toHaveClass('source-ref-score');
+        expect(maxScoreSpan).toHaveClass('score-high');
+
+        // 청크 목록 펼치기
+        const groupToggleBtn = maxScoreSpan.closest('button.source-ref-item')!;
+        await act(async () => {
+          fireEvent.click(groupToggleBtn);
+        });
+
+        // 각 청크 관련도 점수 엘리먼트 및 클래스 확인
+        const score92 = screen.getByText('관련도 92%');
+        const score71 = screen.getByText('관련도 71%');
+        const score45 = screen.getByText('관련도 45%');
+
+        expect(score92).toHaveClass('source-ref-score');
+        expect(score92).toHaveClass('score-high');
+
+        expect(score71).toHaveClass('source-ref-score');
+        expect(score71).toHaveClass('score-medium');
+
+        expect(score45).toHaveClass('source-ref-score');
+        expect(score45).toHaveClass('score-low');
+      });
+
+      it('AC 4 (경계 케이스): score가 undefined인 레거시 청크 데이터는 기본 source-ref-score 클래스만 유지하고 수준별 클래스는 부여되지 않는다', async () => {
+        const mockSession: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec-108-legacy-score',
+          title: '레거시 점수 세션',
+          createdAt: '2026-11-21T00:00:00Z',
+          updatedAt: '2026-11-21T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문', createdAt: '2026-11-21T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '레거시 출처 답변',
+              confidence: 0.7,
+              sources: [
+                {
+                  documentId: 'doc-legacy',
+                  fileName: 'legacy.pdf',
+                  chunkIndex: 0,
+                  snippet: '점수 없는 청크',
+                  // score 필드가 없음
+                },
+              ],
+              createdAt: '2026-11-21T00:00:01Z',
+            },
+          ],
+        };
+
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          { sessionId: 'sess-spec-108-legacy-score', title: '레거시 점수 세션', updatedAt: '2026-11-21T00:00:00Z' },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('레거시 점수 세션'));
+        });
+
+        // score가 undefined이므로 최고 관련도/관련도 span이 없거나, 렌더링되더라도 score-high/medium/low가 없어야 함
+        expect(screen.queryByText(/최고 관련도/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/관련도 \d+%/)).not.toBeInTheDocument();
+      });
+
+      it('스트리밍 진행 중(currentSources)에서도 점수 수준별 클래스가 실시간으로 반영된다', async () => {
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        let triggerSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+
+        vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+          const onSources = args[6];
+          triggerSources = onSources;
+          // onDone 호출하지 않고 스트리밍 유지
+          return new Promise(() => {});
+        });
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+        await act(async () => {
+          fireEvent.change(input, { target: { value: '스트리밍 점수 질문' } });
+        });
+        await act(async () => {
+          fireEvent.submit(input.closest('form')!);
+        });
+
+        // 스트리밍 출처 전달
+        await act(async () => {
+          triggerSources?.([
+            { documentId: 'doc-stream', fileName: 'stream.pdf', chunkIndex: 0, snippet: '스트리밍 청크 1', score: 0.85 },
+            { documentId: 'doc-stream', fileName: 'stream.pdf', chunkIndex: 1, snippet: '스트리밍 청크 2', score: 0.65 },
+            { documentId: 'doc-stream', fileName: 'stream.pdf', chunkIndex: 2, snippet: '스트리밍 청크 3', score: 0.35 },
+          ]);
+        });
+
+        // 스트리밍 버블 내 문서 그룹 최고 관련도 확인
+        const streamMaxScore = screen.getByText('최고 관련도 85%');
+        expect(streamMaxScore).toHaveClass('source-ref-score');
+        expect(streamMaxScore).toHaveClass('score-high');
+
+        // 청크 목록 열기
+        const toggleBtn = streamMaxScore.closest('button.source-ref-item')!;
+        await act(async () => {
+          fireEvent.click(toggleBtn);
+        });
+
+        expect(screen.getByText('관련도 85%')).toHaveClass('score-high');
+        expect(screen.getByText('관련도 65%')).toHaveClass('score-medium');
+        expect(screen.getByText('관련도 35%')).toHaveClass('score-low');
+      });
+
+      it('세션 복원(handleLoadSession) 시에도 has-ungrounded, is-grounded-verified, grounded-verified-badge가 일관되게 렌더링된다', async () => {
+        const mockSession: aiApi.SessionDetailOut = {
+          sessionId: 'sess-spec-108-restored',
+          title: '복원된 세션',
+          createdAt: '2026-11-21T00:00:00Z',
+          updatedAt: '2026-11-21T00:00:00Z',
+          turns: [
+            { role: 'user', content: '질문 1', createdAt: '2026-11-21T00:00:00Z' },
+            {
+              role: 'assistant',
+              content: '출처 없는 답변 (ungrounded)',
+              confidence: 0.7,
+              sources: [],
+              createdAt: '2026-11-21T00:00:01Z',
+            },
+            { role: 'user', content: '질문 2', createdAt: '2026-11-21T00:00:02Z' },
+            {
+              role: 'assistant',
+              content: '검증 완료 답변 (verified)',
+              confidence: 0.9,
+              sources: [{ documentId: 'd1', fileName: 'd.pdf', chunkIndex: 0, score: 0.9 }],
+              missing: [],
+              createdAt: '2026-11-21T00:00:03Z',
+            },
+          ],
+        };
+
+        vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+        vi.mocked(aiApi.getSessions).mockResolvedValue([
+          { sessionId: 'sess-spec-108-restored', title: '복원된 세션', updatedAt: '2026-11-21T00:00:00Z' },
+        ]);
+        vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+
+        await act(async () => {
+          render(
+            <AuthContext.Provider value={mockAuth108}>
+              <AiService />
+            </AuthContext.Provider>,
+          );
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('복원된 세션'));
+        });
+
+        // 턴 1: ungrounded
+        const bubbleTurn1 = document.querySelector('.message-bubble[data-turn-index="1"]');
+        expect(bubbleTurn1).toHaveClass('has-ungrounded');
+        expect(bubbleTurn1).not.toHaveClass('is-grounded-verified');
+        expect(within(bubbleTurn1 as HTMLElement).getByTestId('ungrounded-warning')).toBeInTheDocument();
+
+        // 턴 3: verified
+        const bubbleTurn3 = document.querySelector('.message-bubble[data-turn-index="3"]');
+        expect(bubbleTurn3).toHaveClass('is-grounded-verified');
+        expect(bubbleTurn3).not.toHaveClass('has-ungrounded');
+        expect(within(bubbleTurn3 as HTMLElement).getByTestId('grounded-verified-badge')).toBeInTheDocument();
+      });
+    });
+  });
 });
+
 

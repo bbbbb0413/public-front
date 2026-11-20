@@ -1234,6 +1234,21 @@
   border-radius: 3px;
 }
 
+.source-ref-score.score-high {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+}
+
+.source-ref-score.score-medium {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.14);
+}
+
+.source-ref-score.score-low {
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.14);
+}
+
 .source-ref-view-btn,
 .btn-view-doc-chunks {
   align-self: flex-start;
@@ -1615,6 +1630,30 @@
 /* ── 저신뢰도 경고 배너 및 질문 구체화 (SPEC-093, SPEC-100) ── */
 .message-bubble.has-low-confidence {
   border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+/* ── 근거 부재 및 검증 완료 답변 버블/배지 (SPEC-108) ── */
+.message-bubble.has-ungrounded {
+  border: 1px solid rgba(248, 113, 113, 0.4);
+}
+
+.message-bubble.is-grounded-verified {
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
+.grounded-verified-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.2rem 0.55rem;
+  margin-bottom: 0.5rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.15);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 9999px;
+  line-height: 1.2;
 }
 
 /* ── 사용자 부정확 평가 경고 배너 및 버블 스타일 (SPEC-107) ── */
