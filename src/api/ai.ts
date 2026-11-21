@@ -357,6 +357,13 @@ export const getBookmarks = async (
   return response.data ?? [];
 };
 
+export const getSessionBookmarks = async (
+  sessionId: string,
+): Promise<BookmarkItem[]> => {
+  const response = await client.get(`/ai/rag/bookmarks/session/${sessionId}`);
+  return response.data ?? [];
+};
+
 export const createBookmark = async (
   input: CreateBookmarkIn,
 ): Promise<BookmarkItem> => {

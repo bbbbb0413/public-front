@@ -15,6 +15,7 @@ import {
   deleteSessionById,
   toggleSessionBookmark,
   getBookmarks,
+  getSessionBookmarks,
   createBookmark,
   deleteBookmark,
   subscribeIngestJob,
@@ -206,6 +207,7 @@ export const AiService = () => {
   const [sessionSearchQuery, setSessionSearchQuery] = useState('');
   const [sidebarTab, setSidebarTab] = useState<'sessions' | 'bookmarks'>('sessions');
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
+  const [bookmarksByTurn, setBookmarksByTurn] = useState<Record<number, BookmarkItem>>({});
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [bookmarkSuccessMsg, setBookmarkSuccessMsg] = useState<string | null>(null);
   const bookmarkMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -341,6 +343,29 @@ export const AiService = () => {
     setBookmarkNote('');
   };
 
+  const handleToggleAnswerBookmark = async (turnIndex: number, text: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const existingBookmark = bookmarksByTurn[turnIndex];
+    if (existingBookmark) {
+      try {
+        await deleteBookmark(existingBookmark.id);
+        setBookmarksByTurn((prev) => {
+          const next = { ...prev };
+          delete next[turnIndex];
+          return next;
+        });
+        showBookmarkToast('답변 보관이 해제되었습니다.');
+        if (sidebarTab === 'bookmarks') {
+          fetchBookmarks();
+        }
+      } catch {
+        setErrorMsg('답변 보관 해제에 실패했습니다.');
+      }
+      return;
+    }
+    handleBookmarkAnswer(turnIndex, text, e);
+  };
+
   const handleBookmarkNoteChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     if (val.length <= 200) {
@@ -361,11 +386,17 @@ export const AiService = () => {
     setIsSavingBookmark(true);
     try {
       const trimmed = bookmarkNote.trim();
-      await createBookmark({
+      const newBookmark = await createBookmark({
         sessionId,
         turnIndex: bookmarkModalTarget.turnIndex,
         note: trimmed || undefined,
       });
+      if (typeof newBookmark?.turnIndex === 'number') {
+        setBookmarksByTurn((prev) => ({
+          ...prev,
+          [newBookmark.turnIndex!]: newBookmark,
+        }));
+      }
       setBookmarkModalTarget(null);
       setBookmarkNote('');
       showBookmarkToast('답변이 보관함에 저장되었습니다.');
@@ -400,6 +431,18 @@ export const AiService = () => {
     try {
       await deleteBookmark(bid);
       setBookmarks((prev) => prev.filter((b) => b.id !== bid));
+      setBookmarksByTurn((prev) => {
+        let changed = false;
+        const next: Record<number, BookmarkItem> = {};
+        for (const [key, item] of Object.entries(prev)) {
+          if (item.id === bid) {
+            changed = true;
+          } else {
+            next[Number(key)] = item;
+          }
+        }
+        return changed ? next : prev;
+      });
       setDeletingBookmark(null);
       showBookmarkToast('보관 항목이 삭제되었습니다.');
     } catch {
@@ -504,6 +547,7 @@ export const AiService = () => {
     setCopiedIndex(null);
     setFeedbackByTurn({});
     setActiveFeedbackTurns({});
+    setBookmarksByTurn({});
   };
 
   const loadFeedback = async (sid: string) => {
@@ -512,6 +556,21 @@ export const AiService = () => {
       setFeedbackByTurn(Object.fromEntries(items.map((f) => [f.turnIndex, f])));
     } catch {
       setFeedbackByTurn({});
+    }
+  };
+
+  const loadSessionBookmarks = async (sid: string) => {
+    try {
+      const items = await getSessionBookmarks(sid);
+      const map: Record<number, BookmarkItem> = {};
+      items.forEach((item) => {
+        if (typeof item.turnIndex === 'number') {
+          map[item.turnIndex] = item;
+        }
+      });
+      setBookmarksByTurn(map);
+    } catch {
+      setBookmarksByTurn({});
     }
   };
 
@@ -580,6 +639,7 @@ export const AiService = () => {
       }));
       setChatLog(loaded);
       await loadFeedback(detail.sessionId);
+      await loadSessionBookmarks(detail.sessionId);
       setStreamingAnswer('');
       streamingAnswerRef.current = '';
       setCurrentSources([]);
@@ -2165,11 +2225,12 @@ export const AiService = () => {
                             {sessionId && (
                               <button
                                 type="button"
-                                className="btn-bookmark-answer"
-                                onClick={(e) => handleBookmarkAnswer(turnIndex, msg.text || '', e)}
-                                aria-label="답변 보관"
+                                className={`btn-bookmark-answer${bookmarksByTurn[turnIndex] ? ' bookmarked' : ''}`}
+                                onClick={(e) => handleToggleAnswerBookmark(turnIndex, msg.text || '', e)}
+                                aria-label={bookmarksByTurn[turnIndex] ? '답변 보관 해제' : '답변 보관'}
+                                title={bookmarksByTurn[turnIndex] ? '보관 해제' : '답변 보관'}
                               >
-                                ★ 보관
+                                {bookmarksByTurn[turnIndex] ? '★ 보관됨' : '★ 보관'}
                               </button>
                             )}
                             <button
