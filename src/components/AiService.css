@@ -2104,6 +2104,16 @@
   color: #fef08a;
 }
 
+.btn-bookmark-answer.bookmarked {
+  background: rgba(250, 204, 21, 0.15);
+  border: 1px solid rgba(250, 204, 21, 0.4);
+  color: #facc15;
+}
+
+.btn-bookmark-answer.bookmarked:hover {
+  background: rgba(250, 204, 21, 0.25);
+}
+
 .chat-modal-main {
   flex: 1;
   min-width: 0;

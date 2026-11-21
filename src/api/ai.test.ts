@@ -26,6 +26,7 @@ import {
   deleteSessionById,
   toggleSessionBookmark,
   getBookmarks,
+  getSessionBookmarks,
   createBookmark,
   deleteBookmark,
   subscribeIngestJob,
@@ -193,6 +194,25 @@ describe('AI Service API (Gateway 경유)', () => {
       params: { page: 1, limit: 20, q: '보관' },
     });
     expect(result).toEqual(mockBookmarks);
+  });
+
+  it('getSessionBookmarks should call GET /ai/rag/bookmarks/session/:sessionId', async () => {
+    const mockSessionBookmarks = [
+      {
+        id: 'bm-1',
+        sessionId: 's1',
+        turnIndex: 1,
+        title: '세션 제목',
+        content: '보관된 답변 본문',
+        note: '중요한 답변',
+        createdAt: '2026-09-08T00:00:00Z',
+      },
+    ];
+    mockAxios.get.mockResolvedValueOnce({ data: mockSessionBookmarks });
+
+    const result = await getSessionBookmarks('s1');
+    expect(mockAxios.get).toHaveBeenCalledWith('/ai/rag/bookmarks/session/s1');
+    expect(result).toEqual(mockSessionBookmarks);
   });
 
   it('createBookmark should call POST /ai/rag/bookmarks', async () => {
