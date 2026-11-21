@@ -15773,6 +15773,128 @@ describe('AiService Component', () => {
       expect(screen.queryByRole('button', { name: '답변 보관 해제' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '답변 보관' })).not.toBeInTheDocument();
     });
+
+    it('QA (경계): getSessionBookmarks 호출 실패 시 자바스크립트 오류 없이 모든 버튼이 기본 "★ 보관" 상태로 안전하게 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-109', title: '북마크 연동 세션', updatedAt: '2026-11-22T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetailSession);
+      vi.mocked(aiApi.getSessionBookmarks).mockRejectedValue(new Error('네트워크 오류'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth109}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('북마크 연동 세션'));
+      });
+
+      // API 실패 시에도 기본 보관 버튼으로 안전하게 렌더링
+      const normalBtns = screen.getAllByRole('button', { name: '답변 보관' });
+      expect(normalBtns).toHaveLength(2);
+      expect(screen.queryByRole('button', { name: '답변 보관 해제' })).not.toBeInTheDocument();
+    });
+
+    it('QA (실패 경로): 답변 보관 해제 API 호출 실패 시 에러 메시지가 표시되고 "★ 보관됨" 상태가 유지된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-109', title: '북마크 연동 세션', updatedAt: '2026-11-22T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetailSession);
+      vi.mocked(aiApi.getSessionBookmarks).mockResolvedValue([
+        {
+          id: 'bm-turn-1',
+          sessionId: 'sess-spec-109',
+          turnIndex: 1,
+          title: '북마크 연동 세션',
+          content: '결제일로부터 14일 이내 환불 가능합니다.',
+          createdAt: '2026-11-22T00:00:05Z',
+        },
+      ]);
+      vi.mocked(aiApi.deleteBookmark).mockRejectedValue(new Error('삭제 실패'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth109}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('북마크 연동 세션'));
+      });
+
+      const bookmarkedBtn = screen.getByRole('button', { name: '답변 보관 해제' });
+      expect(bookmarkedBtn).toHaveTextContent('★ 보관됨');
+
+      await act(async () => {
+        fireEvent.click(bookmarkedBtn);
+      });
+
+      expect(aiApi.deleteBookmark).toHaveBeenCalledWith('bm-turn-1');
+      // 에러 메시지 확인 및 보관됨 상태 유지
+      expect(screen.getByText('답변 보관 해제에 실패했습니다.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '답변 보관 해제' })).toHaveTextContent('★ 보관됨');
+    });
+
+    it('QA (경계): getSessionBookmarks 결과에 turnIndex가 null인 항목이 포함되어 있어도 정상 필터링되어 유효한 턴만 반영된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-109', title: '북마크 연동 세션', updatedAt: '2026-11-22T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockDetailSession);
+      vi.mocked(aiApi.getSessionBookmarks).mockResolvedValue([
+        {
+          id: 'bm-legacy-session',
+          sessionId: 'sess-spec-109',
+          turnIndex: undefined,
+          title: '북마크 연동 세션',
+          createdAt: '2026-11-22T00:00:05Z',
+        },
+        {
+          id: 'bm-turn-3',
+          sessionId: 'sess-spec-109',
+          turnIndex: 3,
+          title: '북마크 연동 세션',
+          content: '부분 환불은 고객센터 문의가 필요합니다.',
+          createdAt: '2026-11-22T00:00:05Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth109}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('북마크 연동 세션'));
+      });
+
+      // 1번 턴은 미보관, 3번 턴만 보관됨으로 반영
+      expect(screen.getByRole('button', { name: '답변 보관' })).toHaveTextContent('★ 보관');
+      expect(screen.getByRole('button', { name: '답변 보관 해제' })).toHaveTextContent('★ 보관됨');
+    });
   });
 });
 
