@@ -1,7 +1,12 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
-import { AnswerFeedback } from './AnswerFeedback';
+import {
+  AnswerFeedback,
+  FEEDBACK_REASONS,
+  parseReasonsFromComment,
+  stripReasonTags,
+} from './AnswerFeedback';
 import type { AnswerFeedbackOut } from '../api/ai';
 
 const existing: AnswerFeedbackOut = {
@@ -678,6 +683,65 @@ describe('AnswerFeedback', () => {
       const reasonTags = screen.getAllByText(/^(환각\/사실 오류|근거 문서와 다름)$/);
       expect(reasonTags).toHaveLength(2);
       expect(reasonsContainer).not.toHaveTextContent('문서에는 2024년으로 적혀있는데');
+    });
+  });
+
+  describe('SPEC-110: 공용 유틸리티 및 상수 export 검증', () => {
+    it('FEEDBACK_REASONS 상수가 5가지 불만족 사유를 올바르게 정의한다', () => {
+      expect(FEEDBACK_REASONS).toEqual([
+        '환각/사실 오류',
+        '근거 문서와 다름',
+        '질문 의도와 무관',
+        '내용 불완전/부족',
+        '최신 정보 아님',
+      ]);
+    });
+
+    describe('parseReasonsFromComment', () => {
+      it('빈 문자열이나 공백인 경우 빈 배열을 반환한다', () => {
+        expect(parseReasonsFromComment('')).toEqual([]);
+        expect(parseReasonsFromComment('   ')).toEqual([]);
+      });
+
+      it('유효한 불만족 사유 태그만 추출하고 중복을 제거한다', () => {
+        const comment = '[환각/사실 오류] [근거 문서와 다름] [환각/사실 오류] [알 수 없는 태그]';
+        expect(parseReasonsFromComment(comment)).toEqual([
+          '환각/사실 오류',
+          '근거 문서와 다름',
+        ]);
+      });
+
+      it('코멘트에 일반 본문이 섞여 있어도 유효 사유만 추출한다', () => {
+        const comment = '[근거 문서와 다름] 2024년 2분기 영업이익 기준이 아닙니다';
+        expect(parseReasonsFromComment(comment)).toEqual(['근거 문서와 다름']);
+      });
+    });
+
+    describe('stripReasonTags', () => {
+      it('빈 문자열인 경우 빈 문자열을 반환한다', () => {
+        expect(stripReasonTags('')).toBe('');
+        expect(stripReasonTags('   ')).toBe('');
+      });
+
+      it('사유 태그만 존재하는 경우 빈 문자열을 반환한다', () => {
+        const comment = '[환각/사실 오류] [최신 정보 아님]';
+        expect(stripReasonTags(comment)).toBe('');
+      });
+
+      it('사유 태그와 상세 의견이 함께 있는 경우 사유 태그를 제거하고 상세 의견만 반환한다', () => {
+        const comment = '[근거 문서와 다름] 2024년 2분기 영업이익 기준이 아닙니다';
+        expect(stripReasonTags(comment)).toBe('2024년 2분기 영업이익 기준이 아닙니다');
+      });
+
+      it('복수의 사유 태그와 상세 의견이 함께 있는 경우 모든 태그를 제거하고 상세 의견만 반환한다', () => {
+        const comment = '[환각/사실 오류] [최신 정보 아님] 최신 수치로 업데이트 바랍니다';
+        expect(stripReasonTags(comment)).toBe('최신 수치로 업데이트 바랍니다');
+      });
+
+      it('사유 태그가 없는 경우 원본 의견 본문을 반환한다', () => {
+        const comment = '표 형식으로 다시 정리해줘';
+        expect(stripReasonTags(comment)).toBe('표 형식으로 다시 정리해줘');
+      });
     });
   });
 });

@@ -33,7 +33,11 @@ import {
   DocumentChunk,
 } from '../api/ai';
 import { AuthContext } from '../context/AuthContext';
-import { AnswerFeedback } from './AnswerFeedback';
+import {
+  AnswerFeedback,
+  parseReasonsFromComment,
+  stripReasonTags,
+} from './AnswerFeedback';
 import { formatDateTime } from '../utils/date';
 import { PromptSettingsModal } from './ai/PromptSettingsModal';
 import './AiService.css';
@@ -1223,6 +1227,7 @@ export const AiService = () => {
   const handleRefineQuestion = (questionText: string) => {
     setQuestion(questionText);
     chatInputRef.current?.focus();
+    chatInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   const handleRefineFeedbackQuestion = (msgIndex: number, turnIndex?: number) => {
@@ -1240,11 +1245,15 @@ export const AiService = () => {
 
     let extractedReason = '';
     if (rawComment) {
-      const tagMatches = rawComment.match(/\[([^\]]+)\]/g);
-      if (tagMatches && tagMatches.length > 0) {
-        extractedReason = tagMatches.join(' ');
-      } else {
-        extractedReason = rawComment;
+      const reasons = parseReasonsFromComment(rawComment);
+      const customComment = stripReasonTags(rawComment);
+      const tagText = reasons.map((r) => `[${r}]`).join(' ');
+      if (tagText && customComment) {
+        extractedReason = `${tagText} ${customComment}`;
+      } else if (tagText) {
+        extractedReason = tagText;
+      } else if (customComment) {
+        extractedReason = customComment;
       }
     }
 
@@ -1254,6 +1263,8 @@ export const AiService = () => {
       setQuestion(questionText);
     }
     chatInputRef.current?.focus();
+    chatInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showBookmarkToast('불만족 피드백이 질문 입력창에 반영되었습니다.');
   };
 
   const handleAskMissingItem = (itemText: string) => {
@@ -2258,6 +2269,8 @@ export const AiService = () => {
                               <button
                                 type="button"
                                 className="btn-feedback-refine"
+                                data-testid="btn-feedback-refine"
+                                aria-label="불만족 사유를 반영하여 질문 다시 작성"
                                 onClick={() => handleRefineFeedbackQuestion(idx, turnIndex)}
                                 disabled={isStreaming}
                               >
