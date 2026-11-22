@@ -9433,6 +9433,59 @@ describe('AiService Component', () => {
       expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
     });
 
+    it('경계 케이스: 피드백에 코멘트 속성이 없거나 빈 문자열인 경우 보완 요청 접미사 없이 원래 질문만 바인딩된다 (SPEC-110)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-no-comment', title: '무코멘트 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-no-comment',
+        title: '무코멘트 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '코멘트 없는 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변 내용', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-no-comment',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('무코멘트 세션'));
+      });
+
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('코멘트 없는 질문');
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
+    });
+
     it('답변 스트리밍 중일 때는 [질문 보완하여 다시 질문] 버튼이 disabled 상태가 된다', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([

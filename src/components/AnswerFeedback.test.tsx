@@ -733,6 +733,11 @@ describe('AnswerFeedback', () => {
         expect(stripReasonTags(comment)).toBe('2024년 2분기 영업이익 기준이 아닙니다');
       });
 
+      it('복수의 사유 태그와 상세 의견이 함께 있는 경우 모든 태그를 제거하고 상세 의견만 반환한다', () => {
+        const comment = '[환각/사실 오류] [최신 정보 아님] 최신 수치로 업데이트 바랍니다';
+        expect(stripReasonTags(comment)).toBe('최신 수치로 업데이트 바랍니다');
+      });
+
       it('사유 태그가 없는 경우 원본 의견 본문을 반환한다', () => {
         const comment = '표 형식으로 다시 정리해줘';
         expect(stripReasonTags(comment)).toBe('표 형식으로 다시 정리해줘');
