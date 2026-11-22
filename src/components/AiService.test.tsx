@@ -9124,19 +9124,21 @@ describe('AiService Component', () => {
       const refineButtons = screen.getAllByRole('button', { name: /질문 구체화/i });
       expect(refineButtons).toHaveLength(2);
 
-      // 첫 번째 답변의 [질문 구체화] 클릭 시 '첫 번째 질문 내용' 복원
+      // 첫 번째 답변의 [질문 구체화] 클릭 시 '첫 번째 질문 내용' 복원 및 부드러운 스크롤 이동
       await act(async () => {
         fireEvent.click(refineButtons[0]);
       });
       expect(input.value).toBe('첫 번째 질문 내용');
       expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
 
-      // 두 번째 답변의 [질문 구체화] 클릭 시 '두 번째 질문 내용' 복원
+      // 두 번째 답변의 [질문 구체화] 클릭 시 '두 번째 질문 내용' 복원 및 부드러운 스크롤 이동
       await act(async () => {
         fireEvent.click(refineButtons[1]);
       });
       expect(input.value).toBe('두 번째 질문 내용');
       expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
     });
   });
 
@@ -9152,7 +9154,7 @@ describe('AiService Component', () => {
       refreshAuth: vi.fn(),
     };
 
-    it('정확도 1~2점으로 평가된 답변 버블에 [질문 보완하여 다시 질문] 버튼이 노출되고, 클릭 시 직전 사용자 질문이 복원된다', async () => {
+    it('정확도 1~2점으로 평가된 답변 버블에 [질문 보완하여 다시 질문] 버튼이 노출되고, 클릭 시 직전 사용자 질문과 사유 태그 및 상세 의견이 결합되어 복원된다 (SPEC-110)', async () => {
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([
         { sessionId: 'sess-low', title: '저평가 세션', updatedAt: '2026-08-28T01:00:00Z' },
@@ -9193,9 +9195,10 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('저평가 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       expect(refineBtn).toBeInTheDocument();
       expect(refineBtn).toHaveClass('btn-feedback-refine');
+      expect(refineBtn).toHaveAttribute('aria-label', '불만족 사유를 반영하여 질문 다시 작성');
 
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
       expect(input.value).toBe('');
@@ -9204,8 +9207,230 @@ describe('AiService Component', () => {
         fireEvent.click(refineBtn);
       });
 
-      expect(input.value).toBe('환각이 발생한 원래 질문 (보완 요청: [환각/사실 오류])');
+      expect(input.value).toBe('환각이 발생한 원래 질문 (보완 요청: [환각/사실 오류] 내용이 틀렸습니다)');
       expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
+    });
+
+    it('사유 태그와 사용자 직접 입력 상세 의견이 모두 존재하는 경우 둘 다 보존하여 입력창에 바인딩한다 (SPEC-110)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-diff', title: '근거 상이 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-diff',
+        title: '근거 상이 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '2024년 영업이익 얼마야?', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '2024년 영업이익은 100억원입니다.', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-diff',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[근거 문서와 다름] 2024년 2분기 영업이익 기준이 아닙니다',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('근거 상이 세션'));
+      });
+
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe(
+        '2024년 영업이익 얼마야? (보완 요청: [근거 문서와 다름] 2024년 2분기 영업이익 기준이 아닙니다)',
+      );
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
+    });
+
+    it('사유 태그 없이 상세 의견만 있는 경우 상세 의견만 보완 요청으로 바인딩한다 (SPEC-110)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-custom', title: '의견 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-custom',
+        title: '의견 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '데이터 요약해줘', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '데이터는 다음과 같습니다...', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-custom',
+          turnIndex: 1,
+          accuracy: 2,
+          helpfulness: 2,
+          comment: '표 형식으로 다시 정리해줘',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('의견 세션'));
+      });
+
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('데이터 요약해줘 (보완 요청: 표 형식으로 다시 정리해줘)');
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
+    });
+
+    it('사유 태그만 복수로 있는 경우 태그들이 보완 요청으로 바인딩된다 (SPEC-110)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-multi-tags', title: '복수 사유 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-multi-tags',
+        title: '복수 사유 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '프로젝트 일정 알려줘', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '일정은 2023년까지였습니다.', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-multi-tags',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[환각/사실 오류] [최신 정보 아님]',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('복수 사유 세션'));
+      });
+
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe(
+        '프로젝트 일정 알려줘 (보완 요청: [환각/사실 오류] [최신 정보 아님])',
+      );
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
+    });
+
+    it('경계 케이스: 피드백에 코멘트가 전혀 없거나 공백 문자만 있는 경우 원래 질문만 바인딩된다 (SPEC-110)', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-empty-comment', title: '공백 코멘트 세션', updatedAt: '2026-08-28T01:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue({
+        sessionId: 'sess-empty-comment',
+        title: '공백 코멘트 세션',
+        createdAt: '2026-08-28T01:00:00Z',
+        updatedAt: '2026-08-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '공백 피드백 테스트 질문', createdAt: '2026-08-28T01:00:00Z' },
+          { role: 'assistant', content: '답변 내용', createdAt: '2026-08-28T01:00:01Z' },
+        ],
+      });
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-empty-comment',
+          turnIndex: 1,
+          accuracy: 2,
+          helpfulness: 2,
+          comment: '   ',
+          createdAt: '2026-08-28T01:00:02Z',
+          updatedAt: '2026-08-28T01:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuthContextValue}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('공백 코멘트 세션'));
+      });
+
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.click(refineBtn);
+      });
+
+      expect(input.value).toBe('공백 피드백 테스트 질문');
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest' });
+      expect(screen.getByText('불만족 피드백이 질문 입력창에 반영되었습니다.')).toBeInTheDocument();
     });
 
     it('답변 스트리밍 중일 때는 [질문 보완하여 다시 질문] 버튼이 disabled 상태가 된다', async () => {
@@ -9258,7 +9483,7 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('저평가 세션 2'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       expect(refineBtn).not.toBeDisabled();
 
       // 새 질문 전송하여 스트리밍 시작
@@ -9515,7 +9740,7 @@ describe('AiService Component', () => {
       });
 
       expect(
-        screen.queryByRole('button', { name: '질문 보완하여 다시 질문' }),
+        screen.queryByTestId('btn-feedback-refine'),
       ).not.toBeInTheDocument();
     });
 
@@ -9570,7 +9795,7 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('복수 턴 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       expect(refineBtn).toBeInTheDocument();
 
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
@@ -9580,7 +9805,7 @@ describe('AiService Component', () => {
         fireEvent.click(refineBtn);
       });
 
-      expect(input.value).toBe('두 번째 사용자 질문(저평가 대상) (보완 요청: [환각/사실 오류])');
+      expect(input.value).toBe('두 번째 사용자 질문(저평가 대상) (보완 요청: [환각/사실 오류] 잘못됨)');
       expect(input).toHaveFocus();
     });
 
@@ -11303,14 +11528,14 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('사유 태그 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
 
       await act(async () => {
         fireEvent.click(refineBtn);
       });
 
-      expect(input.value).toBe('원래 질문 내용 (보완 요청: [환각/사실 오류] [근거 문서와 다름])');
+      expect(input.value).toBe('원래 질문 내용 (보완 요청: [환각/사실 오류] [근거 문서와 다름] 내용이 실제와 전혀 다릅니다)');
       expect(input).toHaveFocus();
     });
 
@@ -11355,7 +11580,7 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('자유 의견 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
 
       await act(async () => {
@@ -11441,7 +11666,7 @@ describe('AiService Component', () => {
       expect(feedbackBtn).toBeDisabled();
 
       // [질문 보완하여 다시 질문] 버튼 비활성화 확인
-      const feedbackRefineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const feedbackRefineBtn = screen.getByTestId('btn-feedback-refine');
       expect(feedbackRefineBtn).toBeDisabled();
     });
 
@@ -11486,7 +11711,7 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('단일 사유 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
 
       await act(async () => {
@@ -11538,7 +11763,7 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('빈 코멘트 세션'));
       });
 
-      const refineBtn = screen.getByRole('button', { name: '질문 보완하여 다시 질문' });
+      const refineBtn = screen.getByTestId('btn-feedback-refine');
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
 
       await act(async () => {

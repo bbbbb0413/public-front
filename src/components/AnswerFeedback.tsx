@@ -4,7 +4,8 @@ import type { AnswerFeedbackOut } from '../api/ai';
 const RATINGS = [1, 2, 3, 4, 5] as const;
 const MAX_COMMENT_LENGTH = 1000;
 
-const FEEDBACK_REASONS = [
+// eslint-disable-next-line react-refresh/only-export-components
+export const FEEDBACK_REASONS = [
   '환각/사실 오류',
   '근거 문서와 다름',
   '질문 의도와 무관',
@@ -12,7 +13,8 @@ const FEEDBACK_REASONS = [
   '최신 정보 아님',
 ] as const;
 
-const parseReasonsFromComment = (comment: string): string[] => {
+// eslint-disable-next-line react-refresh/only-export-components
+export const parseReasonsFromComment = (comment: string): string[] => {
   if (!comment) return [];
   const matches = comment.match(/\[([^\]]+)\]/g);
   if (!matches) return [];
@@ -27,7 +29,8 @@ const parseReasonsFromComment = (comment: string): string[] => {
   return found;
 };
 
-const stripReasonTags = (comment: string): string => {
+// eslint-disable-next-line react-refresh/only-export-components
+export const stripReasonTags = (comment: string): string => {
   if (!comment) return '';
   let result = comment;
   for (const reason of FEEDBACK_REASONS) {
