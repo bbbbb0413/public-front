@@ -16174,6 +16174,511 @@ describe('AiService Component', () => {
       expect(screen.getByRole('button', { name: '답변 보관 해제' })).toHaveTextContent('★ 보관됨');
     });
   });
+
+  describe('SPEC-111: AI 답변 출처 청크 열람 모달의 전체 청크 수 오표시 결함 수정 및 인용 청크 관련도 점수 시각화 연동', () => {
+    const mockAuth111 = {
+      user: { uuid: 'test-user-spec111', nickName: 'Tester111' },
+      token: 'jwt-token-111',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    const mock20Chunks = Array.from({ length: 20 }, (_, i) => ({
+      chunkIndex: i,
+      text: `청크 #${i + 1} 본문 텍스트 내용입니다.`,
+    }));
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    });
+
+    it('AC 1: Given 전체 청크가 20개인 문서에서 2개 청크(청크 #1, 청크 #5)가 답변 출처로 인용되었을 때 When 사용자가 참고 문서 목록의 청크 #1 [전문 보기] 버튼을 클릭하면 Then 청크 모달 헤더에 왜곡된 "총 2개"가 아닌 "총 20개"가 정확히 표시되고, 청크 #1 위치로 자동 스크롤된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec111-ac1',
+        title: 'AC1 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-24T00:00:00Z',
+        updatedAt: '2026-11-24T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-24T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-24T00:00:01Z',
+            sources: [
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 0, score: 0.88, snippet: '스니펫 1' },
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 4, score: 0.65, snippet: '스니펫 5' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec111-ac1', title: 'AC1 세션', updatedAt: '2026-11-24T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('AC1 세션'));
+      });
+
+      // 문서 그룹 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /sample\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 청크 #1의 [전문 보기] 버튼 클릭
+      const detailButtons = screen.getAllByRole('button', { name: '전문 보기' });
+      await act(async () => {
+        fireEvent.click(detailButtons[0]);
+      });
+
+      expect(aiApi.getDocumentChunks).toHaveBeenCalledWith('doc-spec111');
+
+      // 모달 열림 확인
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      // 헤더 카운트가 왜곡된 "총 2개"가 아니라 실제 전체 청크 수인 "총 20개"로 표시되어야 함
+      const modalCount = screen.getByText('총 20개');
+      expect(modalCount).toBeInTheDocument();
+      expect(screen.queryByText('총 2개')).not.toBeInTheDocument();
+
+      // 스크롤 호출 확인
+      expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+
+    it('AC 2 & AC 3: Given 답변 참고 문서 그룹에서 [전문 보기] 또는 [청크 목록]을 클릭하여 청크 모달이 열렸을 때 When 인용 청크와 비인용 청크를 확인하면 Then 인용 청크에는 cited-chunk 클래스와 [답변 근거 인용] 배지 및 점수 배지가 표시되고, 비인용 청크에는 표시되지 않는다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec111-ac2',
+        title: 'AC2 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-24T00:00:00Z',
+        updatedAt: '2026-11-24T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-24T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-24T00:00:01Z',
+            sources: [
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 0, score: 0.88, snippet: '스니펫 1' },
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 4, score: 0.65, snippet: '스니펫 5' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec111-ac2', title: 'AC2 세션', updatedAt: '2026-11-24T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('AC2 세션'));
+      });
+
+      // 문서 그룹 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /sample\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // [청크 목록] 버튼 클릭
+      const viewDocChunksBtn = screen.getByRole('button', { name: '청크 목록' });
+      await act(async () => {
+        fireEvent.click(viewDocChunksBtn);
+      });
+
+      // 모달 열림 확인
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText('총 20개')).toBeInTheDocument();
+
+      // 청크 #1 (chunkIndex 0): 인용 청크
+      const chunk0El = document.querySelector('[data-chunk-index="0"]');
+      expect(chunk0El).not.toBeNull();
+      expect(chunk0El).toHaveClass('cited-chunk');
+      const chunk0Badge = within(chunk0El as HTMLElement).getByTestId('cited-chunk-badge');
+      expect(chunk0Badge).toHaveTextContent('답변 근거 인용');
+      const chunk0Score = within(chunk0El as HTMLElement).getByText('관련도 88%');
+      expect(chunk0Score).toHaveClass('source-ref-score');
+      expect(chunk0Score).toHaveClass('score-high');
+
+      // 청크 #5 (chunkIndex 4): 인용 청크
+      const chunk4El = document.querySelector('[data-chunk-index="4"]');
+      expect(chunk4El).not.toBeNull();
+      expect(chunk4El).toHaveClass('cited-chunk');
+      const chunk4Badge = within(chunk4El as HTMLElement).getByTestId('cited-chunk-badge');
+      expect(chunk4Badge).toHaveTextContent('답변 근거 인용');
+      const chunk4Score = within(chunk4El as HTMLElement).getByText('관련도 65%');
+      expect(chunk4Score).toHaveClass('source-ref-score');
+      expect(chunk4Score).toHaveClass('score-medium');
+
+      // 청크 #2 (chunkIndex 1), 청크 #3 (chunkIndex 2): 비인용 청크
+      const chunk1El = document.querySelector('[data-chunk-index="1"]');
+      expect(chunk1El).not.toBeNull();
+      expect(chunk1El).not.toHaveClass('cited-chunk');
+      expect(within(chunk1El as HTMLElement).queryByTestId('cited-chunk-badge')).toBeNull();
+      expect(within(chunk1El as HTMLElement).queryByText(/관련도/)).toBeNull();
+
+      const chunk2El = document.querySelector('[data-chunk-index="2"]');
+      expect(chunk2El).not.toBeNull();
+      expect(chunk2El).not.toHaveClass('cited-chunk');
+      expect(within(chunk2El as HTMLElement).queryByTestId('cited-chunk-badge')).toBeNull();
+      expect(within(chunk2El as HTMLElement).queryByText(/관련도/)).toBeNull();
+    });
+
+    it('AC 4 (경계 케이스): 지식베이스 문서 관리 테이블에서 문서 행의 청크 수 버튼이나 [청크 보기] 버튼을 클릭하여 모달을 열었을 때 "총 {N}개"가 정상 표시되고 모든 청크에 cited-chunk 배지가 표시되지 않는다', async () => {
+      const mockDocs: aiApi.DocumentItem[] = [
+        {
+          id: 'doc-table-1',
+          fileName: 'table-guide.pdf',
+          status: 'completed',
+          chunkCount: 20,
+          createdAt: '2026-11-24T00:00:00Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 문서 관리 테이블의 [청크 보기] 버튼 클릭
+      const viewChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewChunksBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText('총 20개')).toBeInTheDocument();
+
+      // 인용 배지나 클래스가 어떤 청크에도 없어야 함
+      expect(document.querySelector('.cited-chunk')).toBeNull();
+      expect(screen.queryByTestId('cited-chunk-badge')).not.toBeInTheDocument();
+    });
+
+    it('AC 5 (경계 케이스): 인용 청크 데이터에 score 정보가 누락되어 있거나 유효하지 않은 경우 [답변 근거 인용] 배지는 정상 표시되되 관련도 점수 배지는 생략된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec111-ac5',
+        title: 'AC5 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-24T00:00:00Z',
+        updatedAt: '2026-11-24T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-24T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-24T00:00:01Z',
+            sources: [
+              { documentId: 'doc-spec111-legacy', fileName: 'sample.pdf', chunkIndex: 2, snippet: '점수 누락 청크' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec111-ac5', title: 'AC5 세션', updatedAt: '2026-11-24T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('AC5 세션'));
+      });
+
+      // 문서 그룹 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /sample\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // [전문 보기] 클릭
+      const detailBtn = screen.getByRole('button', { name: '전문 보기' });
+      await act(async () => {
+        fireEvent.click(detailBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+
+      const chunk2El = document.querySelector('[data-chunk-index="2"]');
+      expect(chunk2El).not.toBeNull();
+      expect(chunk2El).toHaveClass('cited-chunk');
+      expect(within(chunk2El as HTMLElement).getByTestId('cited-chunk-badge')).toHaveTextContent('답변 근거 인용');
+      // score가 없으므로 관련도 점수 배지는 렌더링되지 않음
+      expect(within(chunk2El as HTMLElement).queryByText(/관련도/)).toBeNull();
+    });
+
+    it('스트리밍 답변의 참고 문서 그룹에서 [전문 보기] 클릭 시에도 인용 청크 배지와 관련도 점수가 모달에 정상 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      let triggerSources: ((sources: aiApi.SourceRef[]) => void) | undefined;
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        triggerSources = args[6];
+        setTimeout(() => onMessage('스트리밍 진행 중 답변입니다.'), 10);
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const questionInput = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(questionInput, { target: { value: '스트리밍 테스트' } });
+      });
+
+      const sendBtn = screen.getByRole('button', { name: '전송' });
+      await act(async () => {
+        fireEvent.click(sendBtn);
+      });
+
+      // 스트리밍 출처 전달
+      await act(async () => {
+        triggerSources?.([
+          { documentId: 'doc-stream-111', fileName: 'stream.pdf', chunkIndex: 3, score: 0.95, snippet: '스니펫 3' },
+        ]);
+      });
+
+      // 스트리밍 버블 내 문서 그룹 펼치기
+      const docToggleBtn = screen.getByRole('button', { name: /stream\.pdf/i });
+      await act(async () => {
+        fireEvent.click(docToggleBtn);
+      });
+
+      // 스트리밍 [전문 보기] 클릭
+      const detailBtn = screen.getByRole('button', { name: '전문 보기' });
+      await act(async () => {
+        fireEvent.click(detailBtn);
+      });
+
+      // 모달 확인
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText('총 20개')).toBeInTheDocument();
+
+      const chunk3El = document.querySelector('[data-chunk-index="3"]');
+      expect(chunk3El).not.toBeNull();
+      expect(chunk3El).toHaveClass('cited-chunk');
+      expect(within(chunk3El as HTMLElement).getByTestId('cited-chunk-badge')).toHaveTextContent('답변 근거 인용');
+      expect(within(chunk3El as HTMLElement).getByText('관련도 95%')).toBeInTheDocument();
+    });
+
+    it('QA: 답변 참고 문서에서 모달을 열어 인용 청크를 확인한 후 모달을 닫고, 지식베이스 테이블에서 청크 열람 시 modalCitedChunks 상태가 완전히 초기화되어 인용 배지가 남지 않는다', async () => {
+      const mockDocs: aiApi.DocumentItem[] = [
+        {
+          id: 'doc-spec111',
+          fileName: 'sample.pdf',
+          status: 'completed',
+          chunkCount: 20,
+          createdAt: '2026-11-24T00:00:00Z',
+        },
+      ];
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec111-qa1',
+        title: 'QA1 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-24T00:00:00Z',
+        updatedAt: '2026-11-24T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-24T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-24T00:00:01Z',
+            sources: [
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 1, score: 0.85, snippet: '스니펫' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue(mockDocs);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec111-qa1', title: 'QA1 세션', updatedAt: '2026-11-24T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 1. 대화창 열고 세션 진입
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('QA1 세션'));
+      });
+
+      // 참고 문서 아코디언 펼치기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /sample\.pdf/i }));
+      });
+
+      // [전문 보기] 클릭하여 모달 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '전문 보기' }));
+      });
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(document.querySelector('.cited-chunk')).not.toBeNull();
+
+      // 모달 닫기 버튼 클릭
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+      });
+      expect(screen.queryByRole('dialog', { name: /청크 목록/i })).not.toBeInTheDocument();
+
+      // 채팅창 닫고 지식베이스 관리 테이블 보기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 닫기/i }));
+      });
+
+      // 지식베이스 관리 테이블의 [청크 보기] 버튼 클릭
+      const viewTableChunksBtn = screen.getByRole('button', { name: '청크 보기' });
+      await act(async () => {
+        fireEvent.click(viewTableChunksBtn);
+      });
+
+      expect(screen.getByRole('dialog', { name: /청크 목록/i })).toBeInTheDocument();
+      expect(screen.getByText('총 20개')).toBeInTheDocument();
+
+      // 이전 인용 정보가 남아있지 않아야 함
+      expect(document.querySelector('.cited-chunk')).toBeNull();
+      expect(screen.queryByTestId('cited-chunk-badge')).not.toBeInTheDocument();
+    });
+
+    it('QA: 인용 청크 [전문 보기] 클릭 시 highlighted-chunk와 cited-chunk 클래스가 동시 적용되며 score-low(관련도 30%) 수준별 점수 클래스가 정확히 렌더링된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec111-qa2',
+        title: 'QA2 세션',
+        isBookmarked: false,
+        createdAt: '2026-11-24T00:00:00Z',
+        updatedAt: '2026-11-24T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문입니다', createdAt: '2026-11-24T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변입니다',
+            createdAt: '2026-11-24T00:00:01Z',
+            sources: [
+              { documentId: 'doc-spec111', fileName: 'sample.pdf', chunkIndex: 2, score: 0.3, snippet: '낮은 점수 청크' },
+            ],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec111-qa2', title: 'QA2 세션', updatedAt: '2026-11-24T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getDocumentChunks).mockResolvedValue(mock20Chunks);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth111}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('QA2 세션'));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /sample\.pdf/i }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '전문 보기' }));
+      });
+
+      const chunk2El = document.querySelector('[data-chunk-index="2"]');
+      expect(chunk2El).not.toBeNull();
+      // highlighted-chunk와 cited-chunk 모두 적용 확인
+      expect(chunk2El).toHaveClass('highlighted-chunk');
+      expect(chunk2El).toHaveClass('cited-chunk');
+
+      // 점수 30% 및 score-low 클래스 확인
+      const scoreBadge = within(chunk2El as HTMLElement).getByText('관련도 30%');
+      expect(scoreBadge).toHaveClass('source-ref-score');
+      expect(scoreBadge).toHaveClass('score-low');
+    });
+  });
 });
+
 
 
