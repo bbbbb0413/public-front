@@ -251,6 +251,7 @@ export const AiService = () => {
   const [chunksError, setChunksError] = useState<string | null>(null);
   const targetScrollChunkIndexRef = useRef<number | null>(null);
   const [highlightedChunkIndex, setHighlightedChunkIndex] = useState<number | null>(null);
+  const [modalCitedChunks, setModalCitedChunks] = useState<Record<number, number>>({});
   const chunkHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showBookmarkToast = (msg: string) => {
@@ -943,6 +944,7 @@ export const AiService = () => {
     async (
       doc: DocumentInfo | { id: string; fileName: string; chunkCount?: number },
       targetChunkIndex?: number | null,
+      citedChunks?: SourceRef[],
     ) => {
       if (chunkHighlightTimerRef.current) {
         clearTimeout(chunkHighlightTimerRef.current);
@@ -951,6 +953,20 @@ export const AiService = () => {
       const validTargetIndex = typeof targetChunkIndex === 'number' ? targetChunkIndex : null;
       targetScrollChunkIndexRef.current = validTargetIndex;
       setHighlightedChunkIndex(validTargetIndex);
+
+      if (citedChunks && citedChunks.length > 0) {
+        const map: Record<number, number> = {};
+        citedChunks.forEach((c) => {
+          if (typeof c.score === 'number') {
+            map[c.chunkIndex] = c.score;
+          } else {
+            map[c.chunkIndex] = -1;
+          }
+        });
+        setModalCitedChunks(map);
+      } else {
+        setModalCitedChunks({});
+      }
 
       setViewingChunksDoc(doc);
       setIsLoadingChunks(true);
@@ -990,6 +1006,7 @@ export const AiService = () => {
     setChunks([]);
     setChunksError(null);
     setIsLoadingChunks(false);
+    setModalCitedChunks({});
   };
 
   useEffect(() => {
@@ -2170,11 +2187,14 @@ export const AiService = () => {
                                         type="button"
                                         className="btn-view-doc-chunks"
                                         onClick={() =>
-                                          handleOpenChunks({
-                                            id: group.documentId,
-                                            fileName: group.fileName,
-                                            chunkCount: (group as { chunkCount?: number }).chunkCount,
-                                          })
+                                          handleOpenChunks(
+                                            {
+                                              id: group.documentId,
+                                              fileName: group.fileName,
+                                            },
+                                            null,
+                                            group.chunks,
+                                          )
                                         }
                                       >
                                         청크 목록
@@ -2195,9 +2215,9 @@ export const AiService = () => {
                                                       {
                                                         id: group.documentId,
                                                         fileName: group.fileName,
-                                                        chunkCount: group.chunks.length,
                                                       },
                                                       chunk.chunkIndex,
+                                                      group.chunks,
                                                     )
                                                   }
                                                 >
@@ -2361,11 +2381,14 @@ export const AiService = () => {
                                     type="button"
                                     className="btn-view-doc-chunks"
                                     onClick={() =>
-                                      handleOpenChunks({
-                                        id: group.documentId,
-                                        fileName: group.fileName,
-                                        chunkCount: (group as { chunkCount?: number }).chunkCount,
-                                      })
+                                      handleOpenChunks(
+                                        {
+                                          id: group.documentId,
+                                          fileName: group.fileName,
+                                        },
+                                        null,
+                                        group.chunks,
+                                      )
                                     }
                                   >
                                     청크 목록
@@ -2386,9 +2409,9 @@ export const AiService = () => {
                                                   {
                                                     id: group.documentId,
                                                     fileName: group.fileName,
-                                                    chunkCount: group.chunks.length,
                                                   },
                                                   chunk.chunkIndex,
+                                                  group.chunks,
                                                 )
                                               }
                                             >
@@ -2646,11 +2669,7 @@ export const AiService = () => {
                   "{viewingChunksDoc.fileName}" 청크 목록
                 </h3>
                 <span className="chunks-modal-count">
-                  총{' '}
-                  {viewingChunksDoc.chunkCount !== undefined
-                    ? viewingChunksDoc.chunkCount
-                    : chunks.length}
-                  개
+                  총 {chunks.length > 0 ? chunks.length : (viewingChunksDoc.chunkCount ?? 0)}개
                 </span>
               </div>
               <button
@@ -2675,18 +2694,36 @@ export const AiService = () => {
               )}
               {!isLoadingChunks && !chunksError && chunks.length > 0 && (
                 <div className="chunk-list">
-                  {chunks.map((chunk) => (
-                    <div
-                      key={chunk.chunkIndex}
-                      className={`chunk-item${chunk.chunkIndex === highlightedChunkIndex ? ' highlighted-chunk' : ''}`}
-                      data-chunk-index={chunk.chunkIndex}
-                    >
-                      <div className="chunk-item-header">
-                        <span className="chunk-badge">청크 #{chunk.chunkIndex + 1}</span>
+                  {chunks.map((chunk) => {
+                    const isCited = modalCitedChunks[chunk.chunkIndex] !== undefined;
+                    const citedScore =
+                      isCited && modalCitedChunks[chunk.chunkIndex] >= 0
+                        ? modalCitedChunks[chunk.chunkIndex]
+                        : undefined;
+
+                    return (
+                      <div
+                        key={chunk.chunkIndex}
+                        className={`chunk-item${chunk.chunkIndex === highlightedChunkIndex ? ' highlighted-chunk' : ''}${isCited ? ' cited-chunk' : ''}`}
+                        data-chunk-index={chunk.chunkIndex}
+                      >
+                        <div className="chunk-item-header">
+                          <span className="chunk-badge">청크 #{chunk.chunkIndex + 1}</span>
+                          {isCited && (
+                            <span className="cited-chunk-badge" data-testid="cited-chunk-badge">
+                              답변 근거 인용
+                            </span>
+                          )}
+                          {typeof citedScore === 'number' && (
+                            <span className={`source-ref-score ${getScoreLevelClass(citedScore)}`.trim()}>
+                              관련도 {Math.round(citedScore * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        <pre className="chunk-text">{chunk.text}</pre>
                       </div>
-                      <pre className="chunk-text">{chunk.text}</pre>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
