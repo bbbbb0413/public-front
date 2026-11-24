@@ -16678,7 +16678,366 @@ describe('AiService Component', () => {
       expect(scoreBadge).toHaveClass('score-low');
     });
   });
+
+  describe('SPEC-112: 단순 RAG 질의 답변 근거 비평(Critique) 연동 및 검증 완료 배지 오표시 방지', () => {
+    const mockAuth112 = {
+      user: { uuid: 'test-user-spec112', nickName: 'Tester112' },
+      token: 'jwt-token-112',
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+      register: vi.fn(),
+    };
+
+    it('AC 1: Given 검색 청크 유사도 0.90이고 답변 비평 결과 confidence=0.85, missing=[]일 때 When done 이벤트 수신 시 Then 신뢰도 85% 배지와 함께 [✓ 지식베이스 근거 검증 완료] 배지가 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+
+        if (onSources) {
+          onSources([
+            {
+              documentId: 'doc-spec112-1',
+              fileName: 'verified_policy.pdf',
+              chunkIndex: 0,
+              snippet: '충실한 정책 근거 문장입니다.',
+              score: 0.9,
+            },
+          ]);
+        }
+        onMessage('문서 근거에 기반한 충실한 검증 완료 답변입니다.');
+        onDone({
+          confidence: 0.85,
+          missing: [],
+        });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '비평 통과 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(aiBubble).toBeInTheDocument();
+      expect(aiBubble).toHaveClass('is-grounded-verified');
+      expect(aiBubble).not.toHaveClass('has-ungrounded');
+      expect(aiBubble).not.toHaveClass('has-low-confidence');
+      expect(aiBubble).not.toHaveClass('has-missing');
+
+      // 상단 검증 완료 배지 렌더링 확인
+      const badge = screen.getByTestId('grounded-verified-badge');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveClass('grounded-verified-badge');
+      expect(badge).toHaveTextContent('✓ 지식베이스 근거 검증 완료');
+
+      // 신뢰도 배지 85% (high) 확인
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toBeInTheDocument();
+      expect(confBadge).toHaveClass('confidence-high');
+      expect(confBadge).toHaveTextContent('85%');
+
+      // 경고 배너 및 배지 미노출 확인
+      expect(screen.queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('low-confidence-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('ungrounded-warning')).not.toBeInTheDocument();
+    });
+
+    it('AC 2: Given 검색 청크 유사도 0.88이지만 환각 답변으로 비평 결과 confidence=0.35, missing=["핵심 수치 정보 불일치"]일 때 When done 이벤트 수신 시 Then 검증 완료 배지는 미노출되고 [답변 신뢰도 낮음] 경고 배너와 [추가 확인 필요] 배지가 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+
+        if (onSources) {
+          onSources([
+            {
+              documentId: 'doc-spec112-2',
+              fileName: 'stat_report.pdf',
+              chunkIndex: 1,
+              snippet: '2025년 기준 매출은 100억원입니다.',
+              score: 0.88,
+            },
+          ]);
+        }
+        onMessage('2025년 기준 매출은 500억원으로 급증했습니다.'); // 청크와 수치 불일치 환각 답변
+        onDone({
+          confidence: 0.35,
+          missing: ['핵심 수치 정보 불일치'],
+        });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '매출 통계 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(aiBubble).toBeInTheDocument();
+      expect(aiBubble).not.toHaveClass('is-grounded-verified');
+      expect(aiBubble).toHaveClass('has-low-confidence');
+      expect(aiBubble).toHaveClass('has-missing');
+
+      // 검증 완료 배지 미노출 확인
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+
+      // 저신뢰도 배너 및 배지 노출 확인
+      const lowConfWarning = screen.getByTestId('low-confidence-warning');
+      expect(lowConfWarning).toBeInTheDocument();
+      expect(lowConfWarning).toHaveTextContent('지식베이스와의 관련도가 낮아 답변이 부정확할 수 있습니다.');
+      expect(screen.getByTestId('low-confidence-badge')).toBeInTheDocument();
+
+      // 추가 확인 필요 배지 및 결여 항목 섹션 노출 확인
+      expect(screen.getByTestId('missing-warning-badge')).toBeInTheDocument();
+      const missingInfo = screen.getByTestId('missing-info');
+      expect(missingInfo).toBeInTheDocument();
+      expect(missingInfo).toHaveTextContent('핵심 수치 정보 불일치');
+      expect(screen.getByRole('button', { name: /핵심 수치 정보 불일치에 대해 질문하기/i })).toBeInTheDocument();
+
+      // 질문 구체화 버튼 노출 확인
+      expect(within(lowConfWarning).getByTestId('btn-refine-question')).toBeInTheDocument();
+
+      // 신뢰도 배지 35% (low) 확인
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toBeInTheDocument();
+      expect(confBadge).toHaveClass('confidence-low');
+      expect(confBadge).toHaveTextContent('35%');
+    });
+
+    it('AC 3 (경계 케이스): Given 지식베이스 청크가 0건(sources=[])이고 confidence=0.0, missing=[]일 때 When done 이벤트 수신 시 Then 근거 문서 미발견 경고 배너가 표시되고 검증 완료 배지는 미노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+
+        if (onSources) {
+          onSources([]);
+        }
+        onMessage('지식베이스에 관련 정보가 없어 일반 상식으로 답변합니다.');
+        onDone({
+          confidence: 0.0,
+          missing: [],
+        });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '문서 없는 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(aiBubble).toBeInTheDocument();
+      expect(aiBubble).not.toHaveClass('is-grounded-verified');
+      expect(aiBubble).toHaveClass('has-ungrounded');
+      expect(aiBubble).not.toHaveClass('has-low-confidence');
+
+      // 검증 완료 배지 미노출 확인
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+
+      // 근거 문서 미발견 배너 노출 확인
+      const ungroundedWarning = screen.getByTestId('ungrounded-warning');
+      expect(ungroundedWarning).toBeInTheDocument();
+      expect(ungroundedWarning).toHaveTextContent('근거 문서 미발견 (모델 일반 지식 기반 답변)');
+
+      // 저신뢰도 배너 및 결여 배지는 미노출 (ungrounded가 우선)
+      expect(screen.queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+    });
+
+    it('AC 4 (실패/예외 폴백 케이스): Given 검색 청크는 존재하나 비평 서비스 예외로 안전 폴백 confidence=0.0, missing=[] 전달 시 When done 이벤트 수신 시 Then 검증 완료 배지가 노출되지 않고 [답변 신뢰도 낮음] 배너가 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+
+        if (onSources) {
+          onSources([
+            {
+              documentId: 'doc-spec112-4',
+              fileName: 'system_spec.pdf',
+              chunkIndex: 0,
+              snippet: '시스템 사양 정보입니다.',
+              score: 0.85,
+            },
+          ]);
+        }
+        onMessage('시스템 사양 관련 답변입니다.');
+        // 비평 실패 시 백엔드 안전 폴백 방출값
+        onDone({
+          confidence: 0.0,
+          missing: [],
+        });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '비평 실패 폴백 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(aiBubble).toBeInTheDocument();
+      expect(aiBubble).not.toHaveClass('is-grounded-verified');
+      expect(aiBubble).toHaveClass('has-low-confidence');
+
+      // 검증 완료 배지 미노출 확인
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+
+      // 저신뢰도 배너 및 배지 노출 확인
+      expect(screen.getByTestId('low-confidence-warning')).toBeInTheDocument();
+      expect(screen.getByTestId('low-confidence-badge')).toBeInTheDocument();
+
+      // 신뢰도 배지 0% (low) 확인
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toBeInTheDocument();
+      expect(confBadge).toHaveClass('confidence-low');
+      expect(confBadge).toHaveTextContent('0%');
+    });
+
+    it('스트리밍 진행 중(답변 생성 중): 검색 청크 유사도가 0.95이더라도 답변 스트리밍 중에는 검증 완료 배지가 선제적으로 노출되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onSources = args[6];
+
+        if (onSources) {
+          onSources([
+            {
+              documentId: 'doc-spec112-streaming',
+              fileName: 'realtime_doc.pdf',
+              chunkIndex: 0,
+              snippet: '실시간 검색 청크입니다.',
+              score: 0.95,
+            },
+          ]);
+        }
+        // 스트리밍 토큰만 전달하고 onDone은 아직 호출하지 않음
+        onMessage('답변을 한 글자씩 스트리밍하는 중...');
+        return {
+          cancel: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '스트리밍 진행 중 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // 스트리밍 버블 존재 확인
+      const streamingBubble = document.querySelector('.message-bubble.streaming');
+      expect(streamingBubble).toBeInTheDocument();
+
+      // 스트리밍 중에는 검증 완료 배지 및 저신뢰도 배너가 노출되지 않음
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
+    });
+  });
 });
+
 
 
 
