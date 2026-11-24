@@ -17035,6 +17035,228 @@ describe('AiService Component', () => {
       expect(screen.queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
       expect(screen.queryByTestId('missing-warning-badge')).not.toBeInTheDocument();
     });
+
+    it('QA (경계값): 비평 confidence가 정확히 0.80(80%)이고 missing=[]일 때는 검증 완료 배지가 표시되고, 0.79(79%)일 때는 표시되지 않는다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      // 1회차: 0.80 (검증 배지 노출)
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([{ documentId: 'd1', fileName: 'doc1.pdf', chunkIndex: 0, snippet: '내용1', score: 0.9 }]);
+        }
+        onMessage('답변 1');
+        onDone({ confidence: 0.8, missing: [] });
+        return Promise.resolve();
+      });
+
+      // 2회차: 0.79 (검증 배지 미노출)
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([{ documentId: 'd2', fileName: 'doc2.pdf', chunkIndex: 0, snippet: '내용2', score: 0.9 }]);
+        }
+        onMessage('답변 2');
+        onDone({ confidence: 0.79, missing: [] });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      // 첫 번째 질문 (0.80)
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '경계값 질문 0.80' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubbles = document.querySelectorAll('.chat-message.ai .message-bubble');
+      expect(aiBubbles.length).toBe(1);
+
+      const turn1Bubble = aiBubbles[0];
+      expect(turn1Bubble).toHaveClass('is-grounded-verified');
+      expect(within(turn1Bubble as HTMLElement).getByTestId('grounded-verified-badge')).toBeInTheDocument();
+      expect(within(turn1Bubble as HTMLElement).getByTestId('confidence-badge')).toHaveTextContent('80%');
+
+      // 두 번째 질문 (0.79)
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '경계값 질문 0.79' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const updatedAiBubbles = document.querySelectorAll('.chat-message.ai .message-bubble');
+      expect(updatedAiBubbles.length).toBe(2);
+      const turn2Bubble = updatedAiBubbles[1];
+      expect(turn2Bubble).not.toHaveClass('is-grounded-verified');
+      expect(within(turn2Bubble as HTMLElement).queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      expect(within(turn2Bubble as HTMLElement).getByTestId('confidence-badge')).toHaveTextContent('79%');
+    });
+
+    it('QA (경계값): 비평 confidence가 0.60(60%)일 때는 저신뢰도 경고 배너가 표시되지 않고, 0.59(59%)일 때는 표시된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      // 1회차: 0.60
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([{ documentId: 'd1', fileName: 'doc1.pdf', chunkIndex: 0, snippet: '내용1', score: 0.8 }]);
+        }
+        onMessage('답변 60%');
+        onDone({ confidence: 0.6, missing: [] });
+        return Promise.resolve();
+      });
+
+      // 2회차: 0.59
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([{ documentId: 'd2', fileName: 'doc2.pdf', chunkIndex: 0, snippet: '내용2', score: 0.8 }]);
+        }
+        onMessage('답변 59%');
+        onDone({ confidence: 0.59, missing: [] });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      // 첫 번째 질문 (0.60)
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '경계값 질문 0.60' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubbles = document.querySelectorAll('.chat-message.ai .message-bubble');
+      expect(aiBubbles.length).toBe(1);
+      const turn1Bubble = aiBubbles[0];
+      expect(turn1Bubble).not.toHaveClass('has-low-confidence');
+      expect(within(turn1Bubble as HTMLElement).queryByTestId('low-confidence-warning')).not.toBeInTheDocument();
+
+      // 두 번째 질문 (0.59)
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '경계값 질문 0.59' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const updatedAiBubbles = document.querySelectorAll('.chat-message.ai .message-bubble');
+      expect(updatedAiBubbles.length).toBe(2);
+      const turn2Bubble = updatedAiBubbles[1];
+      expect(turn2Bubble).toHaveClass('has-low-confidence');
+      expect(within(turn2Bubble as HTMLElement).getByTestId('low-confidence-warning')).toBeInTheDocument();
+      expect(within(turn2Bubble as HTMLElement).getByTestId('btn-refine-question')).toBeInTheDocument();
+    });
+
+    it('QA (고신뢰도 결여 항목 공존): 비평 confidence가 0.90으로 매우 높아도 missing 항목이 1개 이상 존재하면 검증 완료 배지가 절대 노출되지 않고 추가 확인 필요 배지가 노출된다', async () => {
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.askQuestionStream).mockImplementationOnce((...args) => {
+        const onMessage = args[1];
+        const onDone = args[2];
+        const onSources = args[6];
+        if (onSources) {
+          onSources([
+            {
+              documentId: 'doc-high-missing',
+              fileName: 'contract.pdf',
+              chunkIndex: 0,
+              snippet: '계약 일반 조항입니다.',
+              score: 0.92,
+            },
+          ]);
+        }
+        onMessage('계약 체결 절차는 완료되었으나 특약 조항은 확인이 필요합니다.');
+        onDone({
+          confidence: 0.9,
+          missing: ['특약 세부 이행 조항'],
+        });
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth112}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i);
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '고신뢰도 결여 항목 질문' } });
+      });
+      await act(async () => {
+        fireEvent.submit(input.closest('form')!);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      const aiBubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(aiBubble).toBeInTheDocument();
+      // 검증 완료 배지 절대 노출 안 됨
+      expect(aiBubble).not.toHaveClass('is-grounded-verified');
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+
+      // 추가 확인 필요 및 결여 항목 표시
+      expect(aiBubble).toHaveClass('has-missing');
+      expect(screen.getByTestId('missing-warning-badge')).toBeInTheDocument();
+      const missingInfo = screen.getByTestId('missing-info');
+      expect(missingInfo).toHaveTextContent('특약 세부 이행 조항');
+
+      // 신뢰도 배지는 90% (confidence-high) 정상 표시
+      const confBadge = screen.getByTestId('confidence-badge');
+      expect(confBadge).toHaveClass('confidence-high');
+      expect(confBadge).toHaveTextContent('90%');
+    });
   });
 });
 
