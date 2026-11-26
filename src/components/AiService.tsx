@@ -1841,15 +1841,6 @@ export const AiService = () => {
                     msg.confidence < 0.6;
                   const displayMissing = getSanitizedMissing(msg.missing);
                   const hasMissing = isAi && !isUngrounded && displayMissing.length > 0;
-                  const isGroundedVerified =
-                    isAi &&
-                    !isNoSources &&
-                    !isUngrounded &&
-                    !hasMissing &&
-                    !msg.isCancelled &&
-                    !msg.isError &&
-                    msg.confidence !== undefined &&
-                    msg.confidence >= 0.8;
                   const currentFeedback = feedbackByTurn[turnIndex];
                   const hasNegativeFeedback =
                     isAi &&
@@ -1858,6 +1849,19 @@ export const AiService = () => {
                     currentFeedback?.accuracy !== undefined &&
                     currentFeedback.accuracy !== null &&
                     currentFeedback.accuracy <= 2;
+                  const isGroundedVerified =
+                    isAi &&
+                    !isNoSources &&
+                    !isUngrounded &&
+                    !hasMissing &&
+                    !msg.isCancelled &&
+                    !msg.isError &&
+                    !hasNegativeFeedback &&
+                    msg.confidence !== undefined &&
+                    msg.confidence >= 0.8;
+                  const feedbackReasons = currentFeedback?.comment
+                    ? parseReasonsFromComment(currentFeedback.comment)
+                    : [];
 
                   return (
                     <div
@@ -1998,6 +2002,31 @@ export const AiService = () => {
                           </div>
                         ) : (
                           <>
+                          {hasNegativeFeedback && (
+                            <div className="negative-feedback-warning" data-testid="negative-feedback-warning">
+                              <div className="negative-feedback-warning-content">
+                                <span className="negative-feedback-warning-icon" aria-hidden="true">
+                                  ⚠
+                                </span>
+                                <span className="negative-feedback-warning-text">
+                                  {feedbackReasons.length > 0
+                                    ? `사용자가 부정확한 답변으로 평가했습니다. (사유: ${feedbackReasons.join(', ')})`
+                                    : '사용자가 부정확한 답변으로 평가한 내용입니다. 답변 내용을 확인하고 질문을 보완해 보세요.'}
+                                </span>
+                              </div>
+                              <div className="negative-feedback-warning-actions">
+                                <button
+                                  type="button"
+                                  className="btn-refine-negative-question"
+                                  data-testid="btn-refine-negative-question"
+                                  onClick={() => handleRefineFeedbackQuestion(idx, turnIndex)}
+                                  disabled={isStreaming}
+                                >
+                                  질문 보완
+                                </button>
+                              </div>
+                            </div>
+                          )}
                           {isUngrounded ? (
                             <div className="ungrounded-warning" data-testid="ungrounded-warning">
                               <div className="ungrounded-warning-content">
