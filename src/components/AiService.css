@@ -1676,6 +1676,74 @@
   line-height: 1.2;
 }
 
+/* ── 사용자 부정확 평가 인라인 경고 배너 및 액션 버튼 (SPEC-114) ── */
+.negative-feedback-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #f87171;
+}
+
+.negative-feedback-warning-content {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.negative-feedback-warning-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  color: #ef4444;
+}
+
+.negative-feedback-warning-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #fca5a5;
+}
+
+.negative-feedback-warning-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.btn-refine-negative-question {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(239, 68, 68, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.9);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-refine-negative-question:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #b91c1c;
+}
+
+.btn-refine-negative-question:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .low-confidence-badge {
   display: inline-flex;
   align-items: center;
