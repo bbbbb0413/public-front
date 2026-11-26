@@ -17560,9 +17560,73 @@ describe('AiService Component', () => {
       expect(screen.queryByTestId('negative-feedback-warning')).not.toBeInTheDocument();
     });
 
-    it('AC 4 & 5: 과거 세션 복원 시 1점 피드백(사유 태그 없이 자유 의견만 작성)이 있으면 기본 안내 문구가 표시되고 [질문 보완] 클릭 시 질문 입력창에 바인딩된다', async () => {
+    it('AC 4 (경계 케이스): Given 세션 목록에서 과거 세션을 불러왔을 때 신뢰도 0.85인 답변에 이미 1점 피드백이 영속화되어 있을 때 When 대화 화면이 렌더링되면 Then 검증 완료 배지 없이 부정확 평가 배지와 상단 negative-feedback-warning 배너만 노출된다', async () => {
       const mockSession: aiApi.SessionDetailOut = {
         sessionId: 'sess-spec-114-4',
+        title: 'SPEC-114 과거 세션 복원 테스트',
+        createdAt: '2026-11-27T00:00:00Z',
+        updatedAt: '2026-11-27T00:00:00Z',
+        turns: [
+          { role: 'user', content: '환불 규정 알려주세요', createdAt: '2026-11-27T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '환불은 전액 가능합니다.',
+            createdAt: '2026-11-27T00:00:01Z',
+            confidence: 0.85,
+            sources: [
+              { documentId: 'doc-1', fileName: '약관 문서', snippet: '환불 조항', score: 0.88, chunkIndex: 0 },
+            ],
+            missing: [],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-114-4', title: 'SPEC-114 과거 세션 복원 테스트', updatedAt: '2026-11-27T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-spec-114-4',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[환각/사실 오류] 전액 환불 규정은 폐지되었습니다',
+          createdAt: '2026-11-27T00:00:02Z',
+          updatedAt: '2026-11-27T00:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth114}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('SPEC-114 과거 세션 복원 테스트'));
+      });
+
+      const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
+      expect(bubble).not.toHaveClass('is-grounded-verified');
+      expect(bubble).toHaveClass('has-negative-feedback');
+      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
+      expect(screen.getByTestId('negative-feedback-badge')).toBeInTheDocument();
+
+      const warningBanner = screen.getByTestId('negative-feedback-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent('사용자가 부정확한 답변으로 평가했습니다. (사유: 환각/사실 오류)');
+    });
+
+    it('AC 5 (경계 케이스): Given 답변에 사유 태그 없이 자유 의견만 작성된 1점 피드백이 등록되었을 때 When 상단 경고 배너를 확인하면 Then 기본 안내 문구가 표시되고 [질문 보완] 버튼이 정상 바인딩된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-114-5',
         title: 'SPEC-114 자유 의견 세션',
         createdAt: '2026-11-27T00:00:00Z',
         updatedAt: '2026-11-27T00:00:00Z',
@@ -17583,12 +17647,12 @@ describe('AiService Component', () => {
 
       vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
       vi.mocked(aiApi.getSessions).mockResolvedValue([
-        { sessionId: 'sess-spec-114-4', title: 'SPEC-114 자유 의견 세션', updatedAt: '2026-11-27T00:00:00Z' },
+        { sessionId: 'sess-spec-114-5', title: 'SPEC-114 자유 의견 세션', updatedAt: '2026-11-27T00:00:00Z' },
       ]);
       vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
       vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
         {
-          sessionId: 'sess-spec-114-4',
+          sessionId: 'sess-spec-114-5',
           turnIndex: 1,
           accuracy: 1,
           helpfulness: 1,
@@ -17613,12 +17677,6 @@ describe('AiService Component', () => {
         fireEvent.click(screen.getByText('SPEC-114 자유 의견 세션'));
       });
 
-      const bubble = document.querySelector('.message-bubble[data-turn-index="1"]');
-      expect(bubble).not.toHaveClass('is-grounded-verified');
-      expect(bubble).toHaveClass('has-negative-feedback');
-      expect(screen.queryByTestId('grounded-verified-badge')).not.toBeInTheDocument();
-      expect(screen.getByTestId('negative-feedback-badge')).toBeInTheDocument();
-
       const warningBanner = screen.getByTestId('negative-feedback-warning');
       expect(warningBanner).toBeInTheDocument();
       // 사유 태그 없이 자유 의견만 있으므로 기본 안내 문구 표시
@@ -17635,6 +17693,140 @@ describe('AiService Component', () => {
       const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLTextAreaElement;
       expect(input.value).toContain('취소 수수료 얼마인가요?');
       expect(input.value).toContain('규정과 내용이 전혀 맞지 않습니다.');
+    });
+
+    it('QA (경계 케이스 - 복수 사유 태그): 피드백에 복수 사유 태그가 포함되어 있을 때 콤마로 구분된 모든 사유가 배너에 렌더링된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-114-qa-multi',
+        title: 'SPEC-114 복수 사유 세션',
+        createdAt: '2026-11-27T00:00:00Z',
+        updatedAt: '2026-11-27T00:00:00Z',
+        turns: [
+          { role: 'user', content: '질문', createdAt: '2026-11-27T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '답변',
+            createdAt: '2026-11-27T00:00:01Z',
+            confidence: 0.85,
+            sources: [{ documentId: 'doc-1', fileName: 'doc', snippet: 'snip', score: 0.9, chunkIndex: 0 }],
+            missing: [],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-114-qa-multi', title: 'SPEC-114 복수 사유 세션', updatedAt: '2026-11-27T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-spec-114-qa-multi',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '[환각/사실 오류][근거 문서와 다름] 내용이 맞지 않고 문서와 다릅니다',
+          createdAt: '2026-11-27T00:00:02Z',
+          updatedAt: '2026-11-27T00:00:02Z',
+        },
+      ]);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth114}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('SPEC-114 복수 사유 세션'));
+      });
+
+      const warningBanner = screen.getByTestId('negative-feedback-warning');
+      expect(warningBanner).toBeInTheDocument();
+      expect(warningBanner).toHaveTextContent(
+        '사용자가 부정확한 답변으로 평가했습니다. (사유: 환각/사실 오류, 근거 문서와 다름)',
+      );
+    });
+
+    it('QA (경계 케이스 - 스트리밍 진행 중 버튼 비활성화): 새 질문 스트리밍 진행 중에는 상단 경고 배너 내 [질문 보완] 버튼이 disabled 상태가 된다', async () => {
+      const mockSession: aiApi.SessionDetailOut = {
+        sessionId: 'sess-spec-114-qa-stream',
+        title: 'SPEC-114 스트리밍 비활성화 세션',
+        createdAt: '2026-11-27T00:00:00Z',
+        updatedAt: '2026-11-27T00:00:00Z',
+        turns: [
+          { role: 'user', content: '이전 질문', createdAt: '2026-11-27T00:00:00Z' },
+          {
+            role: 'assistant',
+            content: '이전 답변',
+            createdAt: '2026-11-27T00:00:01Z',
+            confidence: 0.85,
+            sources: [{ documentId: 'doc-1', fileName: 'doc', snippet: 'snip', score: 0.9, chunkIndex: 0 }],
+            missing: [],
+          },
+        ],
+      };
+
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue([
+        { sessionId: 'sess-spec-114-qa-stream', title: 'SPEC-114 스트리밍 비활성화 세션', updatedAt: '2026-11-27T00:00:00Z' },
+      ]);
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValue(mockSession);
+      vi.mocked(aiApi.getSessionFeedback).mockResolvedValue([
+        {
+          sessionId: 'sess-spec-114-qa-stream',
+          turnIndex: 1,
+          accuracy: 1,
+          helpfulness: 1,
+          comment: '부정확 답변',
+          createdAt: '2026-11-27T00:00:02Z',
+          updatedAt: '2026-11-27T00:00:02Z',
+        },
+      ]);
+
+      // 스트리밍을 종료하지 않고 진행 상태로 유지
+      vi.mocked(aiApi.askQuestionStream).mockImplementation((...args) => {
+        const onMessage = args[1];
+        setTimeout(() => {
+          onMessage('스트리밍 진행 중...');
+        }, 10);
+        return { cancel: vi.fn() } as unknown as ReturnType<typeof aiApi.askQuestionStream>;
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth114}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('SPEC-114 스트리밍 비활성화 세션'));
+      });
+
+      // 새 질문 전송하여 스트리밍 시작
+      const input = screen.getByPlaceholderText(/질문을 입력하세요/i) as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(input, { target: { value: '후속 질문' } });
+        fireEvent.click(screen.getByRole('button', { name: /전송/i }));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      // 상단 경고 배너 내 [질문 보완] 버튼 disabled 확인
+      const refineBtn = screen.getByTestId('btn-refine-negative-question');
+      expect(refineBtn).toBeDisabled();
     });
   });
 });
