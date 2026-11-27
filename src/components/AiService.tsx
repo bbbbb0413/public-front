@@ -617,7 +617,11 @@ export const AiService = () => {
     });
   };
 
-  const handleLoadSession = async (sid: string, targetTurnIndex?: number | null) => {
+  const handleLoadSession = async (
+    sid: string,
+    targetTurnIndex?: number | null,
+    isFromBookmark?: boolean,
+  ) => {
     currentStreamingIdRef.current += 1;
     if (activeStreamCancelRef.current) {
       void activeStreamCancelRef.current();
@@ -674,8 +678,23 @@ export const AiService = () => {
         setHighlightedTurnIndex(null);
         pendingScrollTurnIndexRef.current = null;
       }
-    } catch {
-      setErrorMsg('세션을 불러오는 데 실패했습니다.');
+    } catch (err) {
+      const is404 =
+        (axios.isAxiosError(err) && err.response?.status === 404) ||
+        (err as { response?: { status?: number } })?.response?.status === 404 ||
+        (err as { status?: number })?.status === 404;
+
+      const isBookmarkContext =
+        Boolean(isFromBookmark) ||
+        sidebarTab === 'bookmarks' ||
+        targetTurnIndex !== undefined;
+
+      if (is404 && isBookmarkContext) {
+        setErrorMsg('존재하지 않거나 삭제된 대화의 보관 항목입니다.');
+        setBookmarks((prev) => prev.filter((b) => b.sessionId !== sid));
+      } else {
+        setErrorMsg('세션을 불러오는 데 실패했습니다.');
+      }
     }
   };
 
@@ -707,6 +726,7 @@ export const AiService = () => {
     try {
       await deleteSessionById(sid);
       setSessions((prev) => prev.filter((s) => s.sessionId !== sid));
+      setBookmarks((prev) => prev.filter((b) => b.sessionId !== sid));
       if (sessionId === sid) handleNewChat();
       setDeletingSession(null);
     } catch {
@@ -1753,7 +1773,7 @@ export const AiService = () => {
                           className={`session-item bookmark-item${sessionId === b.sessionId ? ' active' : ''}${isStreaming ? ' disabled' : ''}`}
                           onClick={() => {
                             if (isStreaming) return;
-                            handleLoadSession(b.sessionId, b.turnIndex);
+                            handleLoadSession(b.sessionId, b.turnIndex, true);
                           }}
                         >
                           <div className="session-item-content">
