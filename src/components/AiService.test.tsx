@@ -17829,6 +17829,409 @@ describe('AiService Component', () => {
       expect(refineBtn).toBeDisabled();
     });
   });
+
+  describe('SPEC-115: 대화 세션 삭제 시 연관 답변 북마크/피드백 연쇄 정리 및 고아 보관 항목 방지', () => {
+    const mockAuth115 = {
+      token: 'jwt-token-spec-115',
+      user: { uuid: 'user-spec-115', role: 'user', email: 'spec115@example.com' },
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    };
+
+    const mockSessions115: aiApi.SessionOut[] = [
+      {
+        sessionId: 'sess-delete-target',
+        title: '삭제 대상 세션',
+        snippet: '삭제될 세션 내용',
+        isBookmarked: true,
+        updatedAt: '2026-11-28T01:00:00Z',
+      },
+      {
+        sessionId: 'sess-remaining',
+        title: '유지되는 세션',
+        snippet: '남아있는 세션 내용',
+        isBookmarked: false,
+        updatedAt: '2026-11-28T01:05:00Z',
+      },
+    ];
+
+    const mockBookmarks115: aiApi.BookmarkItem[] = [
+      {
+        id: 'bm-delete-1',
+        sessionId: 'sess-delete-target',
+        turnIndex: 0,
+        title: '삭제 대상 답변 북마크',
+        content: '삭제될 답변 내용',
+        note: '세션과 함께 삭제되어야 함',
+        createdAt: '2026-11-28T01:00:10Z',
+      },
+      {
+        id: 'bm-remaining-1',
+        sessionId: 'sess-remaining',
+        turnIndex: 0,
+        title: '유지 대상 답변 북마크',
+        content: '남아있을 답변 내용',
+        note: '유지되어야 함',
+        createdAt: '2026-11-28T01:05:10Z',
+      },
+    ];
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.mocked(aiApi.getDocuments).mockResolvedValue([]);
+      vi.mocked(aiApi.getSessions).mockResolvedValue(mockSessions115);
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue(mockBookmarks115);
+      vi.mocked(aiApi.deleteSessionById).mockResolvedValue(undefined);
+    });
+
+    it('Given 사용자가 세션과 해당 세션의 북마크를 보유하고 있을 때 When 세션을 삭제하면 Then 세션 목록뿐 아니라 로컬 보관함 목록에서도 해당 세션의 북마크 항목이 즉시 제거된다', async () => {
+      let currentBookmarks = [...mockBookmarks115];
+      vi.mocked(aiApi.getBookmarks).mockImplementation(async () => currentBookmarks);
+      vi.mocked(aiApi.deleteSessionById).mockImplementation(async (sid) => {
+        currentBookmarks = currentBookmarks.filter((b) => b.sessionId !== sid);
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      // 먼저 보관함 탭을 클릭하여 북마크를 상태에 로드
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+
+      expect(screen.getByText('삭제 대상 답변 북마크')).toBeInTheDocument();
+      expect(screen.getByText('유지 대상 답변 북마크')).toBeInTheDocument();
+
+      // 세션 탭으로 돌아와서 삭제 대상 세션 삭제
+      const sessionTabBtn = screen.getByRole('tab', { name: /대화 목록/i });
+      await act(async () => {
+        fireEvent.click(sessionTabBtn);
+      });
+
+      const deleteTargetBtn = screen.getByRole('button', { name: '삭제 대상 세션 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteTargetBtn);
+      });
+
+      const confirmModal = screen.getByRole('dialog', { name: /대화 삭제 확인/i });
+      expect(confirmModal).toBeInTheDocument();
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      expect(aiApi.deleteSessionById).toHaveBeenCalledWith('sess-delete-target');
+
+      // 다시 보관함 탭으로 이동 시 삭제된 세션의 북마크가 로컬 상태에서 즉시 제거되어 표시되지 않아야 함
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+
+      expect(screen.queryByText('삭제 대상 답변 북마크')).not.toBeInTheDocument();
+      expect(screen.getByText('유지 대상 답변 북마크')).toBeInTheDocument();
+    });
+
+    it('Given 보관함 목록에 이미 삭제된 세션의 고아 북마크가 노출되어 있을 때 When 해당 북마크를 클릭하여 getSessionDetail이 404로 실패하면 Then 안내 메시지("존재하지 않거나 삭제된 대화의 보관 항목입니다.")가 노출되고 해당 고아 북마크가 보관함 목록에서 즉시 정리 제거된다', async () => {
+      const orphanBookmark: aiApi.BookmarkItem = {
+        id: 'bm-orphan',
+        sessionId: 'sess-orphan',
+        turnIndex: 1,
+        title: '고아 답변 북마크',
+        content: '이미 삭제된 대화의 답변',
+        createdAt: '2026-11-28T00:00:00Z',
+      };
+
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue([orphanBookmark]);
+      const notFoundError = Object.assign(new Error('Session not found'), {
+        isAxiosError: true,
+        response: { status: 404, data: { detail: 'Session not found' } },
+      });
+      vi.mocked(aiApi.getSessionDetail).mockRejectedValueOnce(notFoundError);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바 열기 및 보관함 탭 선택
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+
+      expect(screen.getByText('고아 답변 북마크')).toBeInTheDocument();
+
+      // 고아 북마크 클릭하여 세션 로드 시도
+      const orphanItem = screen.getByText('고아 답변 북마크').closest('li');
+      expect(orphanItem).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(orphanItem!);
+      });
+
+      // 404 실패 후 안내 메시지 노출 확인
+      expect(screen.getByText('존재하지 않거나 삭제된 대화의 보관 항목입니다.')).toBeInTheDocument();
+      // 고아 북마크가 로컬 목록에서 즉시 제거되어 비어있음 안내 표시
+      expect(screen.queryByText('고아 답변 북마크')).not.toBeInTheDocument();
+      expect(screen.getByText('보관된 항목이 없습니다')).toBeInTheDocument();
+    });
+
+    it('Given 일반 세션 목록에서 세션을 클릭하거나 500 등 404가 아닌 에러로 실패할 때 When 세션 로드를 시도하면 Then 기본 에러 메시지("세션을 불러오는 데 실패했습니다.")가 노출된다', async () => {
+      vi.mocked(aiApi.getSessionDetail).mockRejectedValueOnce(new Error('500 Server Error'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+
+      const sessionItem = screen.getByText('삭제 대상 세션').closest('li');
+      await act(async () => {
+        fireEvent.click(sessionItem!);
+      });
+
+      expect(screen.getByText('세션을 불러오는 데 실패했습니다.')).toBeInTheDocument();
+      expect(screen.queryByText('존재하지 않거나 삭제된 대화의 보관 항목입니다.')).not.toBeInTheDocument();
+    });
+
+    it('QA (실패 경로): 세션 삭제 API(deleteSessionById)가 실패하면 북마크 목록과 세션 목록이 제거되지 않고 유지되며 세션 삭제 실패 에러 메시지가 표시된다', async () => {
+      vi.mocked(aiApi.deleteSessionById).mockRejectedValueOnce(new Error('500 Internal Server Error'));
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바 열기 및 보관함 탭에서 북마크 로드
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+      expect(screen.getByText('삭제 대상 답변 북마크')).toBeInTheDocument();
+
+      // 세션 탭으로 이동 후 세션 삭제 시도
+      const sessionTabBtn = screen.getByRole('tab', { name: /대화 목록/i });
+      await act(async () => {
+        fireEvent.click(sessionTabBtn);
+      });
+
+      const deleteTargetBtn = screen.getByRole('button', { name: '삭제 대상 세션 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteTargetBtn);
+      });
+
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 삭제 실패 에러 메시지 확인
+      expect(screen.getByText('세션 삭제에 실패했습니다.')).toBeInTheDocument();
+      // 세션 목록에 여전히 남아있어야 함
+      expect(screen.getByText('삭제 대상 세션')).toBeInTheDocument();
+
+      // 보관함 탭으로 이동 시 북마크도 유지되어야 함
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+      expect(screen.getByText('삭제 대상 답변 북마크')).toBeInTheDocument();
+    });
+
+    it('QA (복수 북마크 및 활성 세션 삭제): 현재 활성화된 세션에 복수의 북마크가 등록되어 있을 때 세션을 삭제하면 새 대화로 초기화되고 연관된 복수의 북마크가 모두 제거된다', async () => {
+      let multiBookmarks: aiApi.BookmarkItem[] = [
+        {
+          id: 'bm-delete-1',
+          sessionId: 'sess-delete-target',
+          turnIndex: 0,
+          title: '첫 번째 답변 북마크',
+          content: '내용 1',
+          createdAt: '2026-11-28T01:00:10Z',
+        },
+        {
+          id: 'bm-delete-2',
+          sessionId: 'sess-delete-target',
+          turnIndex: 1,
+          title: '두 번째 답변 북마크',
+          content: '내용 2',
+          createdAt: '2026-11-28T01:00:20Z',
+        },
+        {
+          id: 'bm-remaining-1',
+          sessionId: 'sess-remaining',
+          turnIndex: 0,
+          title: '유지 대상 답변 북마크',
+          content: '남아있을 답변 내용',
+          createdAt: '2026-11-28T01:05:10Z',
+        },
+      ];
+      vi.mocked(aiApi.getBookmarks).mockImplementation(async () => multiBookmarks);
+      vi.mocked(aiApi.deleteSessionById).mockImplementation(async (sid) => {
+        multiBookmarks = multiBookmarks.filter((b) => b.sessionId !== sid);
+      });
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바 열고 보관함 로드
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+      expect(screen.getByText('첫 번째 답변 북마크')).toBeInTheDocument();
+      expect(screen.getByText('두 번째 답변 북마크')).toBeInTheDocument();
+
+      // 세션 탭으로 이동하여 현재 세션으로 로드
+      const sessionTabBtn = screen.getByRole('tab', { name: /대화 목록/i });
+      await act(async () => {
+        fireEvent.click(sessionTabBtn);
+      });
+
+      const sessionItem = screen.getByText('삭제 대상 세션').closest('li');
+      vi.mocked(aiApi.getSessionDetail).mockResolvedValueOnce({
+        sessionId: 'sess-delete-target',
+        title: '삭제 대상 세션',
+        createdAt: '2026-11-28T01:00:00Z',
+        updatedAt: '2026-11-28T01:00:00Z',
+        turns: [
+          { role: 'user', content: '질문 1', createdAt: '2026-11-28T01:00:00Z' },
+          { role: 'assistant', content: '내용 1', createdAt: '2026-11-28T01:00:05Z' },
+          { role: 'user', content: '질문 2', createdAt: '2026-11-28T01:00:10Z' },
+          { role: 'assistant', content: '내용 2', createdAt: '2026-11-28T01:00:15Z' },
+        ],
+        isBookmarked: true,
+      });
+      await act(async () => {
+        fireEvent.click(sessionItem!);
+      });
+
+      // 활성 세션 상태에서 해당 세션 삭제 실행
+      const deleteTargetBtn = screen.getByRole('button', { name: '삭제 대상 세션 삭제' });
+      await act(async () => {
+        fireEvent.click(deleteTargetBtn);
+      });
+      const confirmBtn = screen.getByRole('button', { name: '삭제' });
+      await act(async () => {
+        fireEvent.click(confirmBtn);
+      });
+
+      // 보관함 탭 확인: 동일 세션의 북마크 2개가 모두 제거되고 다른 세션 북마크만 유지됨
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+      expect(screen.queryByText('첫 번째 답변 북마크')).not.toBeInTheDocument();
+      expect(screen.queryByText('두 번째 답변 북마크')).not.toBeInTheDocument();
+      expect(screen.getByText('유지 대상 답변 북마크')).toBeInTheDocument();
+    });
+
+    it('QA (고아 북마크 복수 건 정리): 동일한 세션 ID를 가진 고아 북마크 중 하나를 클릭하여 404가 발생하면 동일 세션에 속한 모든 고아 북마크가 보관함 목록에서 일괄 정리된다', async () => {
+      const multiOrphanBookmarks: aiApi.BookmarkItem[] = [
+        {
+          id: 'bm-orphan-1',
+          sessionId: 'sess-orphan-multi',
+          turnIndex: 0,
+          title: '고아 북마크 1',
+          content: '고아 내용 1',
+          createdAt: '2026-11-28T00:00:00Z',
+        },
+        {
+          id: 'bm-orphan-2',
+          sessionId: 'sess-orphan-multi',
+          turnIndex: 1,
+          title: '고아 북마크 2',
+          content: '고아 내용 2',
+          createdAt: '2026-11-28T00:01:00Z',
+        },
+        {
+          id: 'bm-valid',
+          sessionId: 'sess-valid',
+          turnIndex: 0,
+          title: '정상 북마크',
+          content: '정상 내용',
+          createdAt: '2026-11-28T00:02:00Z',
+        },
+      ];
+
+      vi.mocked(aiApi.getBookmarks).mockResolvedValue(multiOrphanBookmarks);
+      const notFoundError = Object.assign(new Error('Session not found'), {
+        isAxiosError: true,
+        response: { status: 404, data: { detail: 'Session not found' } },
+      });
+      vi.mocked(aiApi.getSessionDetail).mockRejectedValueOnce(notFoundError);
+
+      await act(async () => {
+        render(
+          <AuthContext.Provider value={mockAuth115}>
+            <AiService />
+          </AuthContext.Provider>,
+        );
+      });
+
+      // 사이드바 및 보관함 열기
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /채팅 열기/i }));
+      });
+      const bookmarkTabBtn = screen.getByRole('tab', { name: /보관함/i });
+      await act(async () => {
+        fireEvent.click(bookmarkTabBtn);
+      });
+
+      expect(screen.getByText('고아 북마크 1')).toBeInTheDocument();
+      expect(screen.getByText('고아 북마크 2')).toBeInTheDocument();
+      expect(screen.getByText('정상 북마크')).toBeInTheDocument();
+
+      // 고아 북마크 1 클릭
+      const orphanItem1 = screen.getByText('고아 북마크 1').closest('li');
+      await act(async () => {
+        fireEvent.click(orphanItem1!);
+      });
+
+      // 안내 메시지 표시
+      expect(screen.getByText('존재하지 않거나 삭제된 대화의 보관 항목입니다.')).toBeInTheDocument();
+      // 해당 세션의 고아 북마크 1, 2 모두 제거되고 정상 북마크는 유지됨
+      expect(screen.queryByText('고아 북마크 1')).not.toBeInTheDocument();
+      expect(screen.queryByText('고아 북마크 2')).not.toBeInTheDocument();
+      expect(screen.getByText('정상 북마크')).toBeInTheDocument();
+    });
+  });
 });
 
 
